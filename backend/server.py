@@ -6,6 +6,7 @@ load_dotenv(ROOT_DIR / '.env')
 
 import os
 import io
+import re
 import uuid
 import logging
 from datetime import datetime, timezone, timedelta
@@ -46,6 +47,43 @@ def verify_password(plain: str, hashed: str) -> bool:
         return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
     except Exception:
         return False
+
+def iso_alarm(valor: float, unidade: str, deteccao: str) -> str:
+    """ISO 10816-3 alarm classification.
+    Velocity RMS (mm/s): OK<=2.8, A1<=7.1, A2<=11, Parado>11.
+    Acceleration / envelope based on a simple g threshold."""
+    try:
+        v = float(valor)
+    except (TypeError, ValueError):
+        return "OK"
+    u = (unidade or "").lower()
+    d = (deteccao or "").lower()
+    is_velocity = "mm/s" in u or "velocidade" in d or "veloc" in d
+    is_accel = "g" == u.strip() or "m/s" in u or "acelera" in d or "aceler" in d
+    if is_velocity:
+        if v <= 2.8:
+            return "OK"
+        if v <= 7.1:
+            return "A1"
+        if v <= 11.0:
+            return "A2"
+        return "Parado"
+    if is_accel:
+        if v <= 2.0:
+            return "OK"
+        if v <= 5.0:
+            return "A1"
+        if v <= 10.0:
+            return "A2"
+        return "Parado"
+    # default (unknown unit): use velocity scale
+    if v <= 2.8:
+        return "OK"
+    if v <= 7.1:
+        return "A1"
+    if v <= 11.0:
+        return "A2"
+    return "Parado"
 
 def create_token(user_id: str, email: str, ttl_min: int = 60 * 24 * 7) -> str:
     payload = {
@@ -506,7 +544,41 @@ async def list_measurements(machine_id: Optional[str] = None, user=Depends(get_c
     if machine_id:
         qry["machine_id"] = machine_id
     items = await db.measurements.find(qry, {"_id": 0}).sort("data", 1).to_list(5000)
+    for it in items:
+        it["alarme"] = iso_alarm(it.get("valor"), it.get("unidade", ""), it.get("deteccao", ""))
     return items
+
+@api.get("/measurements/template")
+async def measurements_template(user=Depends(get_current_user)):
+    """Gera um .xlsx pré-preenchido com todas as máquinas de vibração."""
+    machines = await db.machines.find(
+        {"tipo": {"$in": ["vibracao", "ambos"]}}, {"_id": 0}
+    ).sort("tag", 1).to_list(10000)
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Overall"
+    headers = ["Equipamento", "Subconjunto", "Ponto", "Unidade", "Detecção", "Valor"]
+    ws.append(headers)
+    for c in range(1, len(headers) + 1):
+        ws.cell(row=1, column=c).font = openpyxl.styles.Font(bold=True)
+    for m in machines:
+        ws.append([
+            m.get("parent_tag") or m.get("tag", ""),
+            m.get("subconjunto", ""),
+            "", "mm/s", "Velocidade", "",
+        ])
+    widths = [18, 22, 14, 10, 14, 10]
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    from starlette.responses import StreamingResponse
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=template_overall_vibracao.xlsx"},
+    )
 
 @api.post("/measurements/import")
 async def import_measurements(machine_id: Optional[str] = Query(None), file: UploadFile = File(...), user=Depends(require_editor)):
@@ -514,53 +586,89 @@ async def import_measurements(machine_id: Optional[str] = Query(None), file: Upl
     wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
     ws = wb[wb.sheetnames[0]]
     inserted = 0
-    header_idx = {}
+    skipped = 0
+    header_idx: Dict[str, int] = {}
     headers_found = False
+
+    def col(row, key, default=None):
+        i = header_idx.get(key, -1)
+        if 0 <= i < len(row):
+            return row[i]
+        return default
+
     for row in ws.iter_rows(values_only=True):
         if not headers_found:
             vals = [str(c).strip() if c else "" for c in row]
-            if "Equipamento" in vals or "Ponto" in vals:
+            norm = [v.lower() for v in vals]
+            if "equipamento" in norm or "ponto" in norm:
                 for i, v in enumerate(vals):
-                    header_idx[v] = i
+                    header_idx[v.strip().lower()] = i
                 headers_found = True
             continue
         try:
-            equipamento = row[header_idx["Equipamento"]]
-            if not equipamento:
+            equip = col(row, "equipamento")
+            if equip in (None, ""):
                 continue
-            tag = str(equipamento).strip()
-            machine = await db.machines.find_one({"tag": tag})
+            equip = str(equip).strip()
+            sub = str(col(row, "subconjunto", "") or "").strip()
+            ponto = str(col(row, "ponto", "") or "").strip()
+            valor_raw = col(row, "valor")
+            if valor_raw in (None, ""):
+                continue
+            valor = float(valor_raw)
+            unidade = str(col(row, "unidade", "") or "").strip()
+            deteccao = str(col(row, "detecção", "") or col(row, "deteccao", "") or "").strip()
+
+            # Match machine: parent_tag + subconjunto (case-insensitive)
+            machine = None
+            if sub:
+                machine = await db.machines.find_one({
+                    "parent_tag": {"$regex": f"^{re.escape(equip)}$", "$options": "i"},
+                    "subconjunto": {"$regex": f"^{re.escape(sub)}$", "$options": "i"},
+                })
             if not machine:
-                # create a stub machine
+                # try exact composite tag
+                machine = await db.machines.find_one({"tag": {"$regex": f"^{re.escape(equip)}$", "$options": "i"}})
+            if not machine and sub:
+                machine = await db.machines.find_one({"tag": {"$regex": f"^{re.escape(equip)} / {re.escape(sub)}$", "$options": "i"}})
+            if not machine:
+                # try parent_tag only
+                machine = await db.machines.find_one({"parent_tag": {"$regex": f"^{re.escape(equip)}$", "$options": "i"}})
+            if not machine:
+                # create stub with composite tag
+                full_tag = f"{equip} / {sub}" if sub else equip
                 machine = {
                     "id": str(uuid.uuid4()),
-                    "tag": tag,
+                    "tag": full_tag,
+                    "parent_tag": equip,
+                    "subconjunto": sub,
                     "local": "",
-                    "equipamento": tag,
-                    "descricao": "",
+                    "equipamento": equip,
+                    "descricao": sub,
                     "tipo": "vibracao",
                     "criticidade": "Média",
-                    "status": "OK",
+                    "status": "Sem diag.",
                     "created_at": now_iso(),
                 }
                 await db.machines.insert_one(machine)
-            valor = float(row[header_idx["Valor"]]) if row[header_idx["Valor"]] is not None else 0.0
+
             doc = {
                 "id": str(uuid.uuid4()),
                 "machine_id": machine["id"],
-                "machine_tag": tag,
-                "subconjunto": str(row[header_idx.get("Subconjunto", -1)] or "") if header_idx.get("Subconjunto", -1) >= 0 else "",
-                "ponto": str(row[header_idx.get("Ponto", -1)] or "") if header_idx.get("Ponto", -1) >= 0 else "",
+                "machine_tag": machine.get("tag", equip),
+                "subconjunto": sub or machine.get("subconjunto", ""),
+                "ponto": ponto,
                 "valor": valor,
-                "unidade": str(row[header_idx.get("Unidade", -1)] or "") if header_idx.get("Unidade", -1) >= 0 else "",
-                "deteccao": str(row[header_idx.get("Detecção", -1)] or "") if header_idx.get("Detecção", -1) >= 0 else "",
+                "unidade": unidade,
+                "deteccao": deteccao,
                 "data": now_iso(),
             }
             await db.measurements.insert_one(doc)
             inserted += 1
         except Exception as ex:
             logger.warning("Skip measurement: %s", ex)
-    return {"inserted": inserted}
+            skipped += 1
+    return {"inserted": inserted, "skipped": skipped}
 
 @api.post("/measurements")
 async def create_measurement(payload: MeasurementModel, user=Depends(require_editor)):

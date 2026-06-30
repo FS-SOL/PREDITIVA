@@ -26,6 +26,14 @@ Criar software de manutenção preditiva. Login (e-mail/senha + Google) com side
 - Lista de Termografia com cards
 - Importação Excel de medidas (template_overall_vibracao)
 
+## Updated (Jun 2026)
+- Corrigida importação de Medições Overall: casa máquina por parent_tag + subconjunto (case-insensitive), com fallback para tag composta; cria stub se não achar. Verificado via curl.
+- `GET /api/measurements/template`: gera .xlsx pré-preenchido com todas as máquinas de vibração (Equipamento=parent_tag, Subconjunto). Botão "Baixar Template" na tela de Vibração.
+- Aba "Medições" em Análise de Vibração: tabela global (Data, Equip., Subconjunto, Ponto, Valor, Unidade, Detecção, Alarme ISO 10816-3).
+- Helper `iso_alarm` (ISO 10816-3 velocidade RMS mm/s: OK≤2.8, A1≤7.1, A2≤11, Parado>11; escala separada para aceleração g).
+- Cards de vibração mostram "Pico: <valor> <unidade> @ <ponto>".
+- Dashboard já conta subconjuntos (registros individuais) — confirmado, sem alteração necessária.
+
 ## Backlog (P1/P2)
 - P1: Login com Google (Emergent Auth)
 - P1: Exportar diagnósticos em PDF/Excel
