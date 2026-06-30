@@ -1,18 +1,23 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import api from "../lib/api";
+import { useAuth } from "../contexts/AuthContext";
 import { formatDate } from "../lib/dates";
 import StatusBadge from "../components/StatusBadge";
-import { Upload, Search, TrendingUp, Download, Gauge, LayoutGrid } from "lucide-react";
+import { Upload, Search, TrendingUp, Download, Gauge, LayoutGrid, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 
 export default function Vibracao() {
+  const { user } = useAuth();
+  const canEdit = user?.role !== "visualizador";
   const [machines, setMachines] = useState([]);
   const [measurements, setMeasurements] = useState([]);
   const [diagnostics, setDiagnostics] = useState([]);
   const [q, setQ] = useState("");
   const [tab, setTab] = useState("maquinas");
+  const [machineFilter, setMachineFilter] = useState("todas");
   const [selected, setSelected] = useState(null);
+  const [trendPoint, setTrendPoint] = useState(null);
   const fileRef = useRef(null);
 
   const load = async () => {
@@ -25,16 +30,34 @@ export default function Vibracao() {
   };
   useEffect(() => { load(); }, []);
 
-  // Peak amplitude per machine: { machine_id: {valor, unidade, ponto} }
-  const peakByMachine = useMemo(() => {
+  // Latest measurement per (machine, ponto, deteccao) — keep history, show only current
+  const latestByPoint = useMemo(() => {
     const map = {};
     for (const m of measurements) {
+      const key = `${m.machine_id}||${m.ponto}||${m.deteccao}`;
+      const cur = map[key];
+      if (!cur || (m.data || "") > (cur.data || "")) map[key] = m;
+    }
+    return Object.values(map);
+  }, [measurements]);
+
+  // Peak per machine (from current values)
+  const peakByMachine = useMemo(() => {
+    const map = {};
+    for (const m of latestByPoint) {
       const cur = map[m.machine_id];
-      if (!cur || m.valor > cur.valor) {
-        map[m.machine_id] = { valor: m.valor, unidade: m.unidade, ponto: m.ponto };
-      }
+      if (!cur || m.valor > cur.valor) map[m.machine_id] = { valor: m.valor, unidade: m.unidade, ponto: m.ponto };
     }
     return map;
+  }, [latestByPoint]);
+
+  // Distinct machines that have measurements (for the dropdown)
+  const measuredMachines = useMemo(() => {
+    const seen = {};
+    for (const m of measurements) {
+      if (!seen[m.machine_id]) seen[m.machine_id] = m.machine_tag || m.machine_id;
+    }
+    return Object.entries(seen).map(([id, tag]) => ({ id, tag })).sort((a, b) => a.tag.localeCompare(b.tag));
   }, [measurements]);
 
   const filtered = useMemo(
@@ -44,12 +67,12 @@ export default function Vibracao() {
     [machines, q]
   );
 
-  const filteredMeasurements = useMemo(
-    () => measurements.filter((m) =>
-      !q || [m.machine_tag, m.subconjunto, m.ponto, m.deteccao].some((v) => (v || "").toLowerCase().includes(q.toLowerCase()))
-    ).sort((a, b) => (b.data || "").localeCompare(a.data || "")),
-    [measurements, q]
-  );
+  const medicoesRows = useMemo(() => {
+    return latestByPoint
+      .filter((m) => machineFilter === "todas" || m.machine_id === machineFilter)
+      .filter((m) => !q || [m.machine_tag, m.subconjunto, m.ponto, m.deteccao].some((v) => (v || "").toLowerCase().includes(q.toLowerCase())))
+      .sort((a, b) => (a.machine_tag || "").localeCompare(b.machine_tag || "") || (a.ponto || "").localeCompare(b.ponto || ""));
+  }, [latestByPoint, machineFilter, q]);
 
   const trend = useMemo(() => {
     if (!selected) return [];
@@ -57,6 +80,15 @@ export default function Vibracao() {
       .filter((m) => m.machine_id === selected.id)
       .map((m, i) => ({ idx: i + 1, valor: m.valor, ponto: m.ponto, data: formatDate(m.data) }));
   }, [selected, measurements]);
+
+  // Trend history for a single point (modal)
+  const pointHistory = useMemo(() => {
+    if (!trendPoint) return [];
+    return measurements
+      .filter((m) => m.machine_id === trendPoint.machine_id && m.ponto === trendPoint.ponto && m.deteccao === trendPoint.deteccao)
+      .sort((a, b) => (a.data || "").localeCompare(b.data || ""))
+      .map((m) => ({ data: formatDate(m.data), valor: m.valor }));
+  }, [trendPoint, measurements]);
 
   const upload = async (e) => {
     const f = e.target.files?.[0];
@@ -91,21 +123,34 @@ export default function Vibracao() {
     }
   };
 
+  const deletePoint = async (m) => {
+    if (!window.confirm(`Excluir todas as medições do ponto ${m.ponto} (${m.deteccao}) de ${m.machine_tag}?`)) return;
+    try {
+      await api.delete(`/measurements/point/clear`, { params: { machine_id: m.machine_id, ponto: m.ponto || "", deteccao: m.deteccao || "" } });
+      toast.success("Medições excluídas");
+      load();
+    } catch (err) {
+      toast.error("Falha ao excluir");
+    }
+  };
+
   return (
     <div className="space-y-4" data-testid="vibracao-page">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2 className="font-display text-2xl font-bold text-slate-900">Análise de Vibração</h2>
-          <p className="text-sm text-slate-500">{filtered.length} máquinas • {measurements.length} medições</p>
+          <p className="text-sm text-slate-500">{filtered.length} máquinas • {latestByPoint.length} pontos monitorados</p>
         </div>
         <div className="flex gap-2">
           <button data-testid="download-template-btn" onClick={downloadTemplate} className="h-9 px-3 text-sm bg-white border border-slate-300 rounded-md flex items-center gap-2 hover:bg-slate-50">
             <Download size={14} /> Baixar Template
           </button>
-          <input ref={fileRef} type="file" accept=".xlsx" onChange={upload} className="hidden" data-testid="meas-file-input" />
-          <button data-testid="import-meas-btn" onClick={() => fileRef.current?.click()} className="h-9 px-3 text-sm bg-slate-900 text-white rounded-md flex items-center gap-2 hover:bg-slate-800">
-            <Upload size={14} /> Importar Overall
-          </button>
+          {canEdit && <>
+            <input ref={fileRef} type="file" accept=".xlsx" onChange={upload} className="hidden" data-testid="meas-file-input" />
+            <button data-testid="import-meas-btn" onClick={() => fileRef.current?.click()} className="h-9 px-3 text-sm bg-slate-900 text-white rounded-md flex items-center gap-2 hover:bg-slate-800">
+              <Upload size={14} /> Importar Overall
+            </button>
+          </>}
         </div>
       </div>
 
@@ -118,15 +163,23 @@ export default function Vibracao() {
         </button>
       </div>
 
-      <div className="relative">
-        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={tab === "maquinas" ? "Buscar máquina..." : "Buscar medição..."} className="w-full max-w-md h-10 pl-9 pr-3 border border-slate-300 rounded-md text-sm bg-white" />
+      <div className="flex flex-wrap gap-2 items-center">
+        <div className="relative flex-1 min-w-[220px] max-w-md">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={tab === "maquinas" ? "Buscar máquina..." : "Buscar medição..."} className="w-full h-10 pl-9 pr-3 border border-slate-300 rounded-md text-sm bg-white" />
+        </div>
+        {tab === "medicoes" && (
+          <select data-testid="medicoes-machine-filter" value={machineFilter} onChange={(e) => setMachineFilter(e.target.value)} className="h-10 px-3 border border-slate-300 rounded-md text-sm bg-white">
+            <option value="todas">Todas as máquinas ({measuredMachines.length})</option>
+            {measuredMachines.map((mm) => <option key={mm.id} value={mm.id}>{mm.tag}</option>)}
+          </select>
+        )}
       </div>
 
       {tab === "maquinas" && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
           {filtered.map((m) => {
-            const has = measurements.filter((x) => x.machine_id === m.id).length;
+            const points = latestByPoint.filter((x) => x.machine_id === m.id).length;
             const peak = peakByMachine[m.id];
             const machineDiags = diagnostics.filter((d) => d.machine_id === m.id);
             const isDiag = machineDiags.length > 0;
@@ -147,7 +200,7 @@ export default function Vibracao() {
                 <div className="text-xs text-slate-400 truncate">{m.local}</div>
                 <div className="mt-3 flex items-center justify-between text-[11px] text-slate-500">
                   <span className="font-mono">{m.rpm || "-"} RPM</span>
-                  <span className="font-mono">{has} medidas</span>
+                  <span className="font-mono">{points} pontos</span>
                 </div>
                 <div className="mt-1 text-[11px]" data-testid={`vibracao-peak-${m.tag}`}>
                   {peak ? (
@@ -170,14 +223,14 @@ export default function Vibracao() {
           <table className="fs-table w-full">
             <thead>
               <tr>
-                <th>Data</th><th>Equipamento</th><th>Subconjunto</th><th>Ponto</th>
-                <th>Valor</th><th>Unidade</th><th>Detecção</th><th>Alarme</th>
+                <th>Equipamento</th><th>Subconjunto</th><th>Ponto</th>
+                <th>Valor atual</th><th>Unidade</th><th>Detecção</th><th>Alarme</th><th>Atualizado</th><th>Tendência</th>
+                {canEdit && <th>Ações</th>}
               </tr>
             </thead>
             <tbody>
-              {filteredMeasurements.map((m) => (
+              {medicoesRows.map((m) => (
                 <tr key={m.id} data-testid={`medicao-row-${m.id}`}>
-                  <td className="whitespace-nowrap">{formatDate(m.data)}</td>
                   <td className="font-mono text-xs">{m.machine_tag}</td>
                   <td>{m.subconjunto || "—"}</td>
                   <td>{m.ponto || "—"}</td>
@@ -185,13 +238,49 @@ export default function Vibracao() {
                   <td>{m.unidade || "—"}</td>
                   <td>{m.deteccao || "—"}</td>
                   <td><StatusBadge status={m.alarme} /></td>
+                  <td className="whitespace-nowrap text-xs">{formatDate(m.data)}</td>
+                  <td>
+                    <button data-testid={`trend-btn-${m.id}`} onClick={() => setTrendPoint(m)} className="p-1 hover:bg-slate-100 rounded text-slate-700 inline-flex items-center gap-1 text-xs">
+                      <TrendingUp size={14} /> Ver
+                    </button>
+                  </td>
+                  {canEdit && (
+                    <td>
+                      <button data-testid={`del-meas-${m.id}`} onClick={() => deletePoint(m)} className="p-1 hover:bg-red-100 rounded text-red-600">
+                        <Trash2 size={14} />
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
-              {filteredMeasurements.length === 0 && (
-                <tr><td colSpan={8} className="text-center text-slate-500 py-8">Nenhuma medição. Baixe o template, preencha e importe em "Importar Overall".</td></tr>
+              {medicoesRows.length === 0 && (
+                <tr><td colSpan={canEdit ? 10 : 9} className="text-center text-slate-500 py-8">Nenhuma medição. Baixe o template, preencha e importe em "Importar Overall".</td></tr>
               )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Trend modal for a single point */}
+      {trendPoint && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setTrendPoint(null)}>
+          <div className="bg-white rounded-lg p-6 w-full max-w-2xl" onClick={(e) => e.stopPropagation()} data-testid="trend-modal">
+            <h3 className="font-display font-bold text-lg mb-1">Tendência — {trendPoint.ponto} ({trendPoint.deteccao})</h3>
+            <div className="text-sm text-slate-500 mb-4">{trendPoint.machine_tag}</div>
+            {pointHistory.length > 0 ? (
+              <ResponsiveContainer width="100%" height={280}>
+                <LineChart data={pointHistory}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                  <XAxis dataKey="data" tick={{ fontSize: 11 }} />
+                  <YAxis tick={{ fontSize: 11 }} unit={` ${trendPoint.unidade || ""}`} />
+                  <Tooltip />
+                  <Line type="monotone" dataKey="valor" stroke="#0F172A" strokeWidth={2} dot={{ r: 3 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="text-sm text-slate-500 bg-slate-50 p-4 rounded">Apenas uma medição registrada. Importe novos valores mensalmente para ver a tendência.</div>
+            )}
+          </div>
         </div>
       )}
 

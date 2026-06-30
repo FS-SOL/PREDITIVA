@@ -679,6 +679,19 @@ async def create_measurement(payload: MeasurementModel, user=Depends(require_edi
     doc.pop("_id", None)
     return doc
 
+@api.delete("/measurements/{meas_id}")
+async def delete_measurement(meas_id: str, user=Depends(require_editor)):
+    res = await db.measurements.delete_one({"id": meas_id})
+    if not res.deleted_count:
+        raise HTTPException(404, "Medição não encontrada")
+    return {"ok": True}
+
+@api.delete("/measurements/point/clear")
+async def delete_measurement_point(machine_id: str = Query(...), ponto: str = Query(""), deteccao: str = Query(""), user=Depends(require_editor)):
+    """Remove todo o histórico de um ponto (máquina + ponto + detecção)."""
+    res = await db.measurements.delete_many({"machine_id": machine_id, "ponto": ponto, "deteccao": deteccao})
+    return {"ok": True, "deleted": res.deleted_count}
+
 # ============== Dashboard ==============
 @api.get("/dashboard")
 async def dashboard(user=Depends(get_current_user)):

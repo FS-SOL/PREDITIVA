@@ -1,0 +1,47 @@
+{
+  "summary": "Backend 8/8 pytest passing covering measurements template/import/ISO alarm/delete RBAC and machines termografia import. Frontend admin flow validated for /vibracao (template+import buttons, tabs, dropdown, table, trend modal, peaks for ESF-0001/ESF-0002) and /termografia (import button). Viewer RBAC mostly correct, BUT /termografia 'Importar Lista' button is incorrectly shown to viewer (frontend gating missing).",
+  "tested_scope": ["backend", "frontend", "rbac", "integration"],
+  "passed_backend": [
+    "GET /api/measurements/template returns 200 with spreadsheet content-type and pre-populated header [Equipamento, Subconjunto, Ponto, Unidade, Detecção, Valor]",
+    "POST /api/measurements/import matches machine by parent_tag+subconjunto case-insensitive (parent_tag in lowercase) → inserted=3, skipped=0, machine_tag in stored measurement equals composite tag '{parent_tag} / {subconjunto}'",
+    "GET /api/measurements returns ISO 10816-3 alarm field: 1.5 mm/s→OK, 8.2 mm/s→A2, 12.5 mm/s→Parado",
+    "DELETE /api/measurements/{id} as viewer → 403; as admin → 200 {ok:true}",
+    "DELETE /api/measurements/point/clear as viewer → 403; as admin → 200 {ok:true, deleted:N}",
+    "POST /api/machines/import with sheet name 'TERMOGRAFIA' and header [TAG, LOCAL DE INSTALAÇÃO, EQUIPAMENTOS, COMPONENTE] → inserted>=2; GET /api/machines?tipo=termografia returns new entries"
+  ],
+  "passed_frontend": [
+    "/vibracao admin: download-template-btn, import-meas-btn, tab-maquinas, tab-medicoes all visible",
+    "/vibracao Máquinas: cards for raw stub machines ESF-0001 show 'Pico: 6.36 mm/s @ 1HV' and ESF-0002 shows 'Pico: 4 mm/s @ 2HV' via data-testid=vibracao-peak-{tag}",
+    "/vibracao Medições: medicoes-machine-filter dropdown + medicoes-table render; each row has trend-btn-{id} and del-meas-{id} (admin); trend-modal opens on click",
+    "/termografia admin: import-termo-btn visible",
+    "/vibracao viewer: import-meas-btn HIDDEN, del-meas-{id} HIDDEN (download-template-btn still visible — OK, read-only download)",
+    "Viewer sidebar correctly hides admin-only menu items (Plantas, Biblioteca Defeitos, Usuários)"
+  ],
+  "failed_frontend": [
+    {"component": "Termografia.js", "issue": "Botão 'Importar Lista' (data-testid=import-termo-btn) é exibido para viewer (viewer@fs.com). Spec requer que viewer NÃO veja botões de importar. Backend retorna 403, mas UI precisa esconder.", "priority": "MEDIUM", "fix": "Em /app/frontend/src/pages/Termografia.js adicionar const { user } = useAuth(); const canEdit = user?.role !== 'visualizador'; e envolver o botão import-termo-btn com {canEdit && (...)} como em Vibracao.js"}
+  ],
+  "critical_code_review_comments": [
+    "RBAC inconsistency: Vibracao.js usa canEdit corretamente, mas Termografia.js não verifica role do usuário — viola spec.",
+    "Hydration warning no console: <span> dentro de <option> em Vibracao.js linha 173 (provavelmente causado pela instrumentação x-* do preview, mas vale verificar se há text ou children render dentro de <option>). Não bloqueante.",
+    "iso_alarm() em server.py: tratamento de 'g' como unidade usa u.strip()=='g'; bom, mas considere log do unidade desconhecida.",
+    "POST /api/measurements/import cria stubs de máquinas quando não encontra match — pode mascarar erros de cadastro. Considere flag opcional strict_match para retornar warning ao invés de criar stubs silenciosos."
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_vibracao_termo.py",
+    "/app/test_reports/pytest/iter5_results.xml"
+  ],
+  "action_items": [
+    "Adicionar gating de role no botão 'Importar Lista' em /app/frontend/src/pages/Termografia.js (canEdit check como em Vibracao.js)"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_vibracao_termo.py (new)",
+    "/app/backend/tests/__init__.py (new)"
+  ],
+  "success_rate": {"backend": "100% (8/8)", "frontend": "91% (10/11 - termografia viewer gating fail)"},
+  "test_credentials": "Admin admin@fssolucoes.com/admin123, Viewer viewer@fs.com/viewer123 — both functioning",
+  "seed_data_creation": "Created and cleaned: 3 measurements on first machine with parent_tag+subconjunto (deleted via point/clear + single delete tests). Created 2 termografia machines TEST-TERMO-{hex} which were deleted in cleanup test.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "After fix, only re-verify viewer flow at /termografia (import-termo-btn count should be 0). Backend pytest suite at /app/backend/tests/test_vibracao_termo.py is the regression — run with `pytest backend/tests/test_vibracao_termo.py -n 0`.",
+  "rca": "Termografia.js was not refactored with the canEdit pattern from Vibracao.js — likely overlooked when role-based UI gating was added project-wide. Fix is one-liner pattern matching the sibling page."
+}

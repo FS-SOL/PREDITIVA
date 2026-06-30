@@ -1,22 +1,39 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import api from "../lib/api";
 import { formatDate } from "../lib/dates";
 import StatusBadge from "../components/StatusBadge";
-import { Search, Flame } from "lucide-react";
+import { Search, Flame, Upload } from "lucide-react";
+import { toast } from "sonner";
 
 export default function Termografia() {
   const [machines, setMachines] = useState([]);
   const [diagnostics, setDiagnostics] = useState([]);
   const [q, setQ] = useState("");
+  const fileRef = useRef(null);
 
-  useEffect(() => {
-    (async () => {
-      const { data } = await api.get("/machines?tipo=termografia");
-      setMachines(data);
-      const { data: d } = await api.get("/diagnostics");
-      setDiagnostics(d);
-    })();
-  }, []);
+  const load = async () => {
+    const { data } = await api.get("/machines?tipo=termografia");
+    setMachines(data);
+    const { data: d } = await api.get("/diagnostics");
+    setDiagnostics(d);
+  };
+  useEffect(() => { load(); }, []);
+
+  const upload = async (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const fd = new FormData();
+    fd.append("file", f);
+    toast.message("Importando lista de termografia...");
+    try {
+      const { data } = await api.post(`/machines/import`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+      toast.success(`Importados ${data.inserted} pontos${data.skipped ? ` (${data.skipped} já existentes)` : ""}`);
+      load();
+    } catch (err) {
+      toast.error("Falha ao importar. Verifique se a planilha tem uma aba com 'TERMO' no nome.");
+    }
+    fileRef.current.value = "";
+  };
 
   const filtered = useMemo(
     () => machines.filter((m) => !q || [m.tag, m.equipamento, m.local, m.componente].some((v) => (v || "").toLowerCase().includes(q.toLowerCase()))),
@@ -25,9 +42,17 @@ export default function Termografia() {
 
   return (
     <div className="space-y-4" data-testid="termografia-page">
-      <div>
-        <h2 className="font-display text-2xl font-bold text-slate-900">Termografia</h2>
-        <p className="text-sm text-slate-500">{filtered.length} pontos de inspeção termográfica</p>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="font-display text-2xl font-bold text-slate-900">Termografia</h2>
+          <p className="text-sm text-slate-500">{filtered.length} pontos de inspeção termográfica</p>
+        </div>
+        <div className="flex gap-2">
+          <input ref={fileRef} type="file" accept=".xlsx" onChange={upload} className="hidden" data-testid="termo-file-input" />
+          <button data-testid="import-termo-btn" onClick={() => fileRef.current?.click()} className="h-9 px-3 text-sm bg-slate-900 text-white rounded-md flex items-center gap-2 hover:bg-slate-800">
+            <Upload size={14} /> Importar Lista
+          </button>
+        </div>
       </div>
 
       <div className="relative">
@@ -59,7 +84,7 @@ export default function Termografia() {
             </div>
           );
         })}
-        {filtered.length === 0 && <div className="col-span-full text-slate-500 text-sm p-6 text-center">Nenhum ponto cadastrado.</div>}
+        {filtered.length === 0 && <div className="col-span-full text-slate-500 text-sm p-6 text-center">Nenhum ponto cadastrado. Use "Importar Lista".</div>}
       </div>
     </div>
   );
