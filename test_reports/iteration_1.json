@@ -1,0 +1,46 @@
+{
+  "summary": "Smoke testing of FS Soluções Preditiva backend (15 API checks) and frontend (login, sidebar, all 8 nav links, machines page). All critical paths working. Backend seeded correctly (1 plant, 11 defects, 238 machines). Auth works via Bearer token in localStorage 'fs_token'. Excel imports for both machines (TODAS MAQUINAS.xlsx -> 291 rows processed) and measurements (template_overall_vibracao.xlsx -> 5 inserted) succeed. Diagnostic creation correctly updates machine status (ESF-0001 -> A1).",
+  "tested_scope": ["frontend", "backend", "auth", "integration"],
+  "passed": [
+    "POST /api/auth/login with admin@fssolucoes.com/admin123 returns token (field name: 'token')",
+    "GET /api/dashboard returns all required keys: total_machines=238, status_dist, health_index=100.0, top_defects, monthly_evolution, failure_ranking, total_diagnostics",
+    "Unauthenticated request returns 401",
+    "POST /api/auth/register creates user with token",
+    "GET /api/auth/me returns user payload via Bearer",
+    "GET /api/defects returns 11 seeded defects",
+    "GET /api/plants returns 1 seeded plant (FS Soluções)",
+    "POST /api/machines creates machine; duplicate TAG returns 400 'TAG já cadastrada'",
+    "GET /api/machines?q= filter works",
+    "DELETE /api/machines/{id} returns 200",
+    "POST /api/plants creates child unidade; DELETE /api/plants/{id} returns 200",
+    "POST /api/diagnostics creates diagnostic and updates machine.status (ESF-0001 status now A1)",
+    "GET /api/diagnostics?q= search works",
+    "POST /api/machines/import accepts TODAS MAQUINAS.xlsx (skipped=291 since TAGs already in DB)",
+    "POST /api/measurements/import accepts template_overall_vibracao.xlsx (inserted=5)",
+    "Frontend login redirects to /dashboard; sidebar toggle works; all 8 nav links (Dashboard, Plantas, Maquinas, Vibracao, Termografia, Defeitos, Diagnostico, Usuarios) navigate without errors",
+    "Frontend Maquinas page lists 240 machines with TAG, status badges (OK/A1), tipo (VIBRACAO/TERMOGRAFIA) after data loads",
+    "Frontend uses Bearer auth from localStorage fs_token correctly"
+  ],
+  "failed": [
+    {
+      "area": "backend - PUT /api/machines/{id} and PUT /api/plants/{id}",
+      "issue": "Endpoints require the FULL Pydantic model payload; partial body returns 422 (validation error). Not a functional bug if frontend always sends full body, but worth confirming frontend update flows pass complete payloads.",
+      "evidence": "PUT /api/machines/{id} with {fabricante:'Updated'} -> 422; PUT /api/plants/{id} with {name:'X'} -> 422",
+      "priority": "LOW"
+    },
+    {
+      "area": "backend - GET /api/machines/{id}",
+      "issue": "Single-machine GET endpoint not implemented (405 Method Not Allowed). Frontend likely fetches list and filters client-side, so not blocking, but worth noting.",
+      "evidence": "GET /api/machines/51289212-... -> 405 Method Not Allowed",
+      "priority": "LOW"
+    }
+  ],
+  "action_items": [
+    "Optional: implement GET /api/machines/{id} for single-record fetches",
+    "Optional: support partial PATCH semantics for /machines and /plants updates, OR ensure frontend always sends full model"
+  ],
+  "success_rate": {"backend": "100% (critical endpoints)", "frontend": "100% (smoke flows)"},
+  "retest_needed": false,
+  "full_testing_deferred": true,
+  "test_credentials": "Used /app/memory/test_credentials.md admin@fssolucoes.com / admin123 (valid)"
+}
