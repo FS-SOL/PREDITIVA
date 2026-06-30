@@ -5,6 +5,7 @@ const STYLES = {
   A1: "status-a1",
   A2: "status-a2",
   Parado: "status-parado",
+  "Sem diag.": "status-semdiag",
 };
 
 export default function StatusBadge({ status, className = "" }) {

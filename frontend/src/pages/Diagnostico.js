@@ -5,7 +5,7 @@ import StatusBadge from "../components/StatusBadge";
 import { Search, Save, History, X } from "lucide-react";
 import { toast } from "sonner";
 
-const STATUS_COLOR = { OK: "#22C55E", A1: "#FACC15", A2: "#F97316", Parado: "#EF4444" };
+const STATUS_COLOR = { OK: "#22C55E", A1: "#FACC15", A2: "#F97316", Parado: "#EF4444", "Sem diag.": "#94A3B8" };
 
 export default function Diagnostico() {
   const { user } = useAuth();
@@ -200,21 +200,31 @@ export default function Diagnostico() {
       {view === "cards" && !machine && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
           {filtered.map((m) => {
-            const isDiag = !!diagsByMachine[m.id];
+            const hist = diagsByMachine[m.id] || [];
+            const isDiag = hist.length > 0;
+            const last = isDiag ? hist[hist.length - 1] : null;
+            const displayStatus = isDiag ? m.status : "Sem diag.";
             return (
               <button
                 key={m.id}
                 data-testid={`diag-card-${m.tag}`}
                 onClick={() => canEdit ? setMachine(m) : setExpandedMachine(m)}
-                className="bg-white border border-slate-200 rounded-lg p-4 text-left hover:border-slate-900 hover:shadow-sm transition-all relative"
+                className="bg-white border border-slate-200 rounded-lg p-4 text-left hover:border-slate-900 hover:shadow-sm transition-all"
               >
-                {isDiag && <span className="absolute top-2 right-2 text-[10px] uppercase font-bold tracking-wider text-emerald-600">✓ diag.</span>}
-                <div className="flex items-start justify-between mb-2 pr-12">
-                  <div className="font-mono font-bold text-sm">{m.tag}</div>
-                  <StatusBadge status={m.status} />
+                <div className="flex items-start justify-between mb-2 gap-2">
+                  <div className="font-mono font-bold text-sm truncate">{m.tag}</div>
+                  <StatusBadge status={displayStatus} />
                 </div>
                 <div className="text-xs text-slate-600 truncate">{m.equipamento}</div>
                 <div className="text-xs text-slate-400 truncate">{m.local}</div>
+                <div className="mt-2 flex items-center justify-between text-[11px]">
+                  {last ? (
+                    <span className="font-mono text-emerald-700">Últ. diag: {(last.data || "").slice(0, 10)}</span>
+                  ) : (
+                    <span className="text-slate-400 italic">Sem diagnóstico</span>
+                  )}
+                  {hist.length > 1 && <span className="text-slate-500 font-mono">{hist.length} diag.</span>}
+                </div>
               </button>
             );
           })}

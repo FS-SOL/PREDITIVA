@@ -105,6 +105,7 @@ class PlantNode(BaseModel):
 class MachineModel(BaseModel):
     id: Optional[str] = None
     tag: str
+    subconjunto: Optional[str] = ""
     local: Optional[str] = ""
     equipamento: Optional[str] = ""
     descricao: Optional[str] = ""
@@ -114,7 +115,7 @@ class MachineModel(BaseModel):
     rolamento_loa: Optional[str] = ""
     rolamento_la: Optional[str] = ""
     criticidade: Optional[str] = "Média"  # Alta, Média, Baixa
-    status: Optional[str] = "OK"  # OK, A1, A2, Parado
+    status: Optional[str] = "Sem diag."  # OK, A1, A2, Parado, Sem diag.
     tipo: Optional[str] = "vibracao"  # vibracao, termografia, ambos
     componente: Optional[str] = ""
 
@@ -174,9 +175,14 @@ DEFAULT_DEFECTS = [
 async def seed_data():
     # Indexes
     await db.users.create_index("email", unique=True)
-    await db.machines.create_index("tag", unique=True)
     await db.defects.create_index("nome", unique=True)
     await db.plant_nodes.create_index([("type", 1), ("parent_id", 1)])
+    # Drop legacy unique index on tag (we now allow composite tag with subconjunto)
+    try:
+        await db.machines.drop_index("tag_1")
+    except Exception:
+        pass
+    await db.machines.create_index([("tag", 1), ("subconjunto", 1)], unique=True)
 
     # Admin
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@fssolucoes.com")
@@ -342,46 +348,80 @@ async def import_machines(file: UploadFile = File(...), user=Depends(require_edi
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
         tipo = "vibracao" if "VIBRA" in sheet_name.upper() else ("termografia" if "TERMO" in sheet_name.upper() else "ambos")
-        header_row = None
         header_idx = {}
+        headers_found = False
+        # Forward-fill state
+        cur_tag = None
+        cur_local = None
+        cur_equip = None
         for row in ws.iter_rows(values_only=True):
-            if header_row is None:
+            if not headers_found:
                 vals = [str(c).strip().upper() if c else "" for c in row]
                 if "TAG" in vals:
-                    header_row = row
                     for i, v in enumerate(vals):
                         header_idx[v] = i
+                    headers_found = True
                 continue
-            tag_idx = header_idx.get("TAG")
-            if tag_idx is None:
+            tag_i = header_idx.get("TAG")
+            local_i = header_idx.get("LOCAL DE INSTALAÇÃO", -1)
+            equip_i = header_idx.get("EQUIPAMENTOS", -1)
+            desc_i = header_idx.get("DESCRIÇÃO", -1)
+            comp_i = header_idx.get("COMPONENTE", -1)
+            rpm_i = header_idx.get("ROTAÇÃO", -1)
+            pot_i = header_idx.get("POTENCIA", -1)
+            rla_i = header_idx.get("ROLAMENTO LA", -1)
+            rloa_i = header_idx.get("ROLAMENTO LOA", -1)
+
+            raw_tag = row[tag_i] if tag_i is not None and tag_i < len(row) else None
+            raw_local = row[local_i] if local_i >= 0 and local_i < len(row) else None
+            raw_equip = row[equip_i] if equip_i >= 0 and equip_i < len(row) else None
+            raw_desc = row[desc_i] if desc_i >= 0 and desc_i < len(row) else None
+            raw_comp = row[comp_i] if comp_i >= 0 and comp_i < len(row) else None
+
+            # Section header rows (only TAG cell, no local) → just remember TAG context but skip
+            if raw_tag and not raw_local and not raw_desc and not raw_comp:
+                # section header like "INDUSTRIA"; skip
+                cur_tag, cur_local, cur_equip = None, None, None
                 continue
-            tag = row[tag_idx]
-            if not tag or not str(tag).strip():
+
+            # New parent row?
+            if raw_tag and raw_local:
+                cur_tag = str(raw_tag).strip()
+                cur_local = str(raw_local).strip()
+                cur_equip = str(raw_equip or "").strip()
+
+            if not cur_tag:
                 continue
-            tag = str(tag).strip()
-            # Skip section headers (e.g., "INDUSTRIA", "Subestação" - rows where only TAG present)
-            local = row[header_idx.get("LOCAL DE INSTALAÇÃO", -1)] if header_idx.get("LOCAL DE INSTALAÇÃO", -1) >= 0 else None
-            if not local:
+
+            # Subconjunto: vibração = Descrição, termografia = Componente
+            sub = (str(raw_desc).strip() if raw_desc else "") or (str(raw_comp).strip() if raw_comp else "")
+            if not sub:
+                # No subconjunto info — skip (avoids duplicate parent rows)
                 continue
+
+            full_tag = f"{cur_tag} / {sub}"
+
             try:
                 doc = {
                     "id": str(uuid.uuid4()),
-                    "tag": tag,
-                    "local": str(local or "").strip(),
-                    "equipamento": str(row[header_idx.get("EQUIPAMENTOS", -1)] or "").strip() if header_idx.get("EQUIPAMENTOS", -1) >= 0 else "",
-                    "descricao": str(row[header_idx.get("DESCRIÇÃO", -1)] or "").strip() if header_idx.get("DESCRIÇÃO", -1) >= 0 else "",
-                    "rpm": float(row[header_idx.get("ROTAÇÃO", -1)]) if header_idx.get("ROTAÇÃO", -1) >= 0 and row[header_idx["ROTAÇÃO"]] else None,
-                    "potencia": float(row[header_idx.get("POTENCIA", -1)]) if header_idx.get("POTENCIA", -1) >= 0 and row[header_idx["POTENCIA"]] else None,
-                    "rolamento_loa": str(row[header_idx.get("ROLAMENTO LOA", -1)] or "").strip() if header_idx.get("ROLAMENTO LOA", -1) >= 0 else "",
-                    "rolamento_la": str(row[header_idx.get("ROLAMENTO LA", -1)] or "").strip() if header_idx.get("ROLAMENTO LA", -1) >= 0 else "",
-                    "componente": str(row[header_idx.get("COMPONENTE", -1)] or "").strip() if header_idx.get("COMPONENTE", -1) >= 0 else "",
+                    "tag": full_tag,
+                    "parent_tag": cur_tag,
+                    "subconjunto": sub,
+                    "local": cur_local or "",
+                    "equipamento": cur_equip or "",
+                    "descricao": sub if tipo == "vibracao" else "",
+                    "componente": sub if tipo == "termografia" else "",
+                    "rpm": float(row[rpm_i]) if rpm_i >= 0 and rpm_i < len(row) and row[rpm_i] not in (None, "") else None,
+                    "potencia": float(row[pot_i]) if pot_i >= 0 and pot_i < len(row) and row[pot_i] not in (None, "") else None,
+                    "rolamento_loa": str(row[rloa_i] or "").strip() if rloa_i >= 0 and rloa_i < len(row) else "",
+                    "rolamento_la": str(row[rla_i] or "").strip() if rla_i >= 0 and rla_i < len(row) else "",
                     "tipo": tipo,
                     "fabricante": "",
                     "criticidade": "Média",
-                    "status": "OK",
+                    "status": "Sem diag.",
                     "created_at": now_iso(),
                 }
-                exists = await db.machines.find_one({"tag": tag})
+                exists = await db.machines.find_one({"tag": full_tag})
                 if exists:
                     skipped += 1
                 else:
@@ -537,17 +577,25 @@ async def dashboard(user=Depends(get_current_user)):
     machines = await db.machines.find({}, {"_id": 0}).to_list(10000)
     diagnostics = await db.diagnostics.find({}, {"_id": 0}).to_list(5000)
     total = len(machines)
-    status_dist = {"OK": 0, "A1": 0, "A2": 0, "Parado": 0}
+    machines_with_diag = {d["machine_id"] for d in diagnostics}
+    status_dist = {"OK": 0, "A1": 0, "A2": 0, "Parado": 0, "Sem diag.": 0}
     for m in machines:
-        s = m.get("status", "OK")
-        status_dist[s] = status_dist.get(s, 0) + 1
+        if m["id"] not in machines_with_diag:
+            status_dist["Sem diag."] += 1
+        else:
+            s = m.get("status", "OK")
+            if s in status_dist:
+                status_dist[s] += 1
+            else:
+                status_dist["OK"] += 1
 
-    # Health index (weighted)
+    # Health index (weighted) — diagnosticadas
     weight = {"OK": 100, "A1": 70, "A2": 40, "Parado": 0}
-    if total:
-        health = sum(weight.get(m.get("status", "OK"), 0) for m in machines) / total
+    diag_machines = [m for m in machines if m["id"] in machines_with_diag]
+    if diag_machines:
+        health = sum(weight.get(m.get("status", "OK"), 0) for m in diag_machines) / len(diag_machines)
     else:
-        health = 100
+        health = 0
 
     # Top defects (from diagnostics)
     defect_counter: Dict[str, int] = {}

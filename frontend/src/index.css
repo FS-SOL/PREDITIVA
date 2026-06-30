@@ -72,6 +72,7 @@ body {
 .status-a1 { background: #FEF9C3; color: #854D0E; }
 .status-a2 { background: #FFEDD5; color: #9A3412; }
 .status-parado { background: #FEE2E2; color: #991B1B; }
+.status-semdiag { background: #E2E8F0; color: #475569; }
 
 /* sidebar */
 .sidebar-link {

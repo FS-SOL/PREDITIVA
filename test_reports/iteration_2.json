@@ -1,0 +1,30 @@
+{
+  "summary": "Validated bug fixes: Excel import creates one record per subconjunto (ESF-0001 = 6 motors), status='Sem diag.' default, dashboard health_index=0 when no diagnostics, status_dist includes 'Sem diag.', viewer 403 on import, and frontend cards show 'Sem diag.' badge + 'Últ. diag: <date>' when applicable.",
+  "tested_scope": ["backend", "frontend", "auth", "integration"],
+  "passed": [
+    "POST /api/auth/login admin -> token returned",
+    "DB cleared via mongo (213 -> 0)",
+    "POST /api/machines/import (todas_maquinas.xlsx) -> {inserted:213, skipped:9}",
+    "GET /api/machines?q=ESF-0001 -> 6 records: 'ESF-0001 / Motor 01..06', subconjunto='Motor 0X', parent_tag='ESF-0001'",
+    "All imported machines have status='Sem diag.' (Status dist: {'Sem diag.': 213})",
+    "GET /api/dashboard -> total_machines=213, health_index=0, status_dist={'OK':0,'A1':0,'A2':0,'Parado':0,'Sem diag.':213}",
+    "Viewer login -> POST /api/machines/import returns 403 with detail 'Permissão negada: usuário somente leitura'",
+    "Frontend /diagnostico Cards mode: Motor 01 card shows 'OK' + 'Últ. diag: 2026-06-30'",
+    "Frontend /diagnostico Cards mode: Motor 02-06 cards show 'Sem diag.' badge + 'Sem diagnóstico' text",
+    "Header shows '1/213 diagnosticados — 212 pendentes'"
+  ],
+  "failed": [
+    {
+      "area": "POST /api/diagnostics payload mapping (minor)",
+      "issue": "When creating a diagnostic with fields {diagnostic, recommendation}, the response stored empty strings for diagnostico/causa/consequencia/recomendacao and machine_tag is empty. Status was applied correctly (OK).",
+      "evidence": "DIAG response: {\"machine_tag\":\"\",\"diagnostico\":\"\",\"causa\":\"\",\"consequencia\":\"\",\"recomendacao\":\"\",\"status\":\"OK\",...}",
+      "priority": "LOW"
+    }
+  ],
+  "action_items": [
+    "Optional: align /api/diagnostics input schema with frontend field names so diagnostico/causa/consequencia/recomendacao/machine_tag are populated."
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "retest_needed": false,
+  "full_testing_deferred": true
+}

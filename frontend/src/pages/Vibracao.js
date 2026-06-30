@@ -8,6 +8,7 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianG
 export default function Vibracao() {
   const [machines, setMachines] = useState([]);
   const [measurements, setMeasurements] = useState([]);
+  const [diagnostics, setDiagnostics] = useState([]);
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState(null);
   const fileRef = useRef(null);
@@ -17,6 +18,8 @@ export default function Vibracao() {
     setMachines(data);
     const { data: m } = await api.get("/measurements");
     setMeasurements(m);
+    const { data: d } = await api.get("/diagnostics");
+    setDiagnostics(d);
   };
   useEffect(() => { load(); }, []);
 
@@ -69,6 +72,10 @@ export default function Vibracao() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
         {filtered.map((m) => {
           const has = measurements.filter((x) => x.machine_id === m.id).length;
+          const machineDiags = diagnostics.filter((d) => d.machine_id === m.id);
+          const isDiag = machineDiags.length > 0;
+          const last = isDiag ? machineDiags.sort((a, b) => (b.data || "").localeCompare(a.data || ""))[0] : null;
+          const displayStatus = isDiag ? m.status : "Sem diag.";
           return (
             <button
               key={m.id}
@@ -76,15 +83,18 @@ export default function Vibracao() {
               onClick={() => setSelected(m)}
               className="bg-white border border-slate-200 rounded-lg p-4 text-left hover:border-slate-900 hover:shadow-sm transition-all"
             >
-              <div className="flex items-start justify-between mb-2">
-                <div className="font-mono font-bold text-sm">{m.tag}</div>
-                <StatusBadge status={m.status} />
+              <div className="flex items-start justify-between mb-2 gap-2">
+                <div className="font-mono font-bold text-sm truncate">{m.tag}</div>
+                <StatusBadge status={displayStatus} />
               </div>
               <div className="text-xs text-slate-600 truncate">{m.equipamento}</div>
               <div className="text-xs text-slate-400 truncate">{m.local}</div>
               <div className="mt-3 flex items-center justify-between text-[11px] text-slate-500">
                 <span className="font-mono">{m.rpm || "-"} RPM</span>
                 <span className="font-mono">{has} medidas</span>
+              </div>
+              <div className="mt-1 text-[11px]">
+                {last ? <span className="font-mono text-emerald-700">Últ. diag: {(last.data || "").slice(0, 10)}</span> : <span className="text-slate-400 italic">Sem diagnóstico</span>}
               </div>
             </button>
           );

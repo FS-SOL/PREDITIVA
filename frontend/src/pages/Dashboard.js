@@ -6,7 +6,7 @@ import {
 import StatusBadge from "../components/StatusBadge";
 import { Activity, Heart, AlertTriangle, Cog } from "lucide-react";
 
-const COLORS = { OK: "#22C55E", A1: "#FACC15", A2: "#F97316", Parado: "#EF4444" };
+const COLORS = { OK: "#22C55E", A1: "#FACC15", A2: "#F97316", Parado: "#EF4444", "Sem diag.": "#94A3B8" };
 
 const Kpi = ({ icon: Icon, label, value, sub, color = "text-slate-900" }) => (
   <div className="kpi-card" data-testid={`kpi-${label.toLowerCase().replace(/\s+/g, "-")}`}>
