@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import api from "../lib/api";
+import { formatDate, formatDateTime } from "../lib/dates";
 import { useAuth } from "../contexts/AuthContext";
 import StatusBadge from "../components/StatusBadge";
 import { Search, Save, History, X } from "lucide-react";
@@ -149,7 +150,7 @@ export default function Diagnostico() {
               <tbody>
                 {historyFiltered.map((d) => (
                   <tr key={d.id}>
-                    <td className="font-mono text-xs">{(d.data || "").slice(0, 10)}</td>
+                    <td className="font-mono text-xs">{formatDate(d.data)}</td>
                     <td className="font-mono font-semibold">{d.machine_tag}</td>
                     <td className="text-xs max-w-[300px]">{d.diagnostico}</td>
                     <td className="text-xs max-w-[300px]">{d.recomendacao}</td>
@@ -219,7 +220,7 @@ export default function Diagnostico() {
                 <div className="text-xs text-slate-400 truncate">{m.local}</div>
                 <div className="mt-2 flex items-center justify-between text-[11px]">
                   {last ? (
-                    <span className="font-mono text-emerald-700">Últ. diag: {(last.data || "").slice(0, 10)}</span>
+                    <span className="font-mono text-emerald-700">Últ. diag: {formatDate(last.data)}</span>
                   ) : (
                     <span className="text-slate-400 italic">Sem diagnóstico</span>
                   )}
@@ -307,7 +308,7 @@ export default function Diagnostico() {
               {(diagsByMachine[expandedMachine.id] || []).slice().reverse().map((d) => (
                 <div key={d.id} className="border border-slate-200 rounded-md p-3">
                   <div className="flex items-center justify-between mb-1">
-                    <div className="font-mono text-xs text-slate-500">{(d.data || "").slice(0, 16).replace("T", " ")}</div>
+                    <div className="font-mono text-xs text-slate-500">{formatDateTime(d.data)}</div>
                     <StatusBadge status={d.status} />
                   </div>
                   <div className="text-sm font-medium">{d.diagnostico}</div>

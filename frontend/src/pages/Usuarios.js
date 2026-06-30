@@ -49,7 +49,7 @@ export default function Usuarios() {
                 <td className="font-medium">{u.name}</td>
                 <td>{u.email}</td>
                 <td><span className="text-xs uppercase font-mono px-2 py-0.5 rounded bg-slate-100">{u.role}</span></td>
-                <td className="text-xs font-mono text-slate-500">{(u.created_at || "").slice(0, 10)}</td>
+                <td className="text-xs font-mono text-slate-500">{u.created_at ? new Date(u.created_at).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" }) : ""}</td>
               </tr>
             ))}
           </tbody>

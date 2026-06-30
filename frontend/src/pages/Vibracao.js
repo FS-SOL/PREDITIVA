@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import api from "../lib/api";
+import { formatDate } from "../lib/dates";
 import StatusBadge from "../components/StatusBadge";
 import { Upload, Search, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
@@ -34,7 +35,7 @@ export default function Vibracao() {
     if (!selected) return [];
     return measurements
       .filter((m) => m.machine_id === selected.id)
-      .map((m, i) => ({ idx: i + 1, valor: m.valor, ponto: m.ponto, data: (m.data || "").slice(0, 10) }));
+      .map((m, i) => ({ idx: i + 1, valor: m.valor, ponto: m.ponto, data: formatDate(m.data) }));
   }, [selected, measurements]);
 
   const upload = async (e) => {
@@ -94,7 +95,7 @@ export default function Vibracao() {
                 <span className="font-mono">{has} medidas</span>
               </div>
               <div className="mt-1 text-[11px]">
-                {last ? <span className="font-mono text-emerald-700">Últ. diag: {(last.data || "").slice(0, 10)}</span> : <span className="text-slate-400 italic">Sem diagnóstico</span>}
+                {last ? <span className="font-mono text-emerald-700">Últ. diag: {formatDate(last.data)}</span> : <span className="text-slate-400 italic">Sem diagnóstico</span>}
               </div>
             </button>
           );

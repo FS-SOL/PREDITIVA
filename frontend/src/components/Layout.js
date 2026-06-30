@@ -99,7 +99,7 @@ export default function Layout() {
             FS Soluções — Preditiva
           </h1>
           <div className="ml-auto text-xs font-mono text-slate-500">
-            {new Date().toLocaleDateString("pt-BR")}
+            {new Date().toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })}
           </div>
         </header>
         <div className="p-6">

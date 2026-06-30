@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import api from "../lib/api";
+import { formatDate, formatDateTime } from "../lib/dates";
 import StatusBadge from "../components/StatusBadge";
 import { FileText, Printer, Download } from "lucide-react";
 
@@ -53,7 +54,7 @@ export default function Relatorios() {
             <div className="text-amber-600 font-mono text-xs tracking-widest">
               {type === "summary" ? "RELATÓRIO RESUMIDO" : "RELATÓRIO COMPLETO"}
             </div>
-            <div className="text-xs text-slate-500 mt-1">Gerado em: {(data.generated_at || "").slice(0, 19).replace("T", " ")}</div>
+            <div className="text-xs text-slate-500 mt-1">Gerado em: {formatDateTime(data.generated_at)}</div>
           </header>
 
           <section className="mb-8">
@@ -117,7 +118,7 @@ export default function Relatorios() {
                       <div className="font-mono font-bold">{d.machine_tag} — {d.equipamento}</div>
                       <StatusBadge status={d.status} />
                     </div>
-                    <div className="text-xs text-slate-500 mb-1">{(d.data || "").slice(0, 10)} — Técnico: {d.tecnico}</div>
+                    <div className="text-xs text-slate-500 mb-1">{formatDate(d.data)} — Técnico: {d.tecnico}</div>
                     <div className="text-sm"><b>Diagnóstico:</b> {d.diagnostico}</div>
                     {d.causa && <div className="text-xs"><b>Causa:</b> {d.causa}</div>}
                     {d.consequencia && <div className="text-xs"><b>Consequência:</b> {d.consequencia}</div>}

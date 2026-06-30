@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import api from "../lib/api";
+import { formatDate } from "../lib/dates";
 import StatusBadge from "../components/StatusBadge";
 import { Search, Flame } from "lucide-react";
 
@@ -53,7 +54,7 @@ export default function Termografia() {
               <div className="text-xs text-slate-400 truncate">{m.local}</div>
               {m.componente && <div className="text-[11px] text-slate-500 mt-1">Componente: {m.componente}</div>}
               <div className="mt-2 text-[11px]">
-                {last ? <span className="font-mono text-emerald-700">Últ. diag: {(last.data || "").slice(0, 10)}</span> : <span className="text-slate-400 italic">Sem diagnóstico</span>}
+                {last ? <span className="font-mono text-emerald-700">Últ. diag: {formatDate(last.data)}</span> : <span className="text-slate-400 italic">Sem diagnóstico</span>}
               </div>
             </div>
           );

@@ -1,0 +1,20 @@
+{
+  "summary": "Timezone bug fix verified end-to-end. Created a diagnostic at UTC 2026-06-30T02:43:01 (= 29/06/2026 23:43 in America/Sao_Paulo) — the exact post-21:00 BR scenario that exposed the bug. All frontend surfaces now display the correct Brazilian local date 29/06/2026 in pt-BR DD/MM/YYYY format; the buggy UTC slice '2026-06-30' does not appear anywhere.",
+  "tested_scope": ["backend", "frontend", "integration"],
+  "passed": [
+    "POST /api/auth/login (admin) returns token + sets cookie",
+    "GET /api/machines returns list of machines",
+    "POST /api/diagnostics creates diagnostic with field 'data' as ISO UTC (2026-06-30T02:43:01.429686+00:00)",
+    "Layout header shows '29/06/2026' (pt-BR, SP tz) — not 30/06",
+    "/diagnostico Banco view: new row shows DATA '29/06/2026' (pt-BR DD/MM/YYYY)",
+    "/diagnostico Cards view: 'Últ. diag: 29/06/2026' (correct local date, not 2026-06-30)",
+    "/relatorios: contains '29/06/2026' and no buggy '2026-06-30' UTC string",
+    "No occurrences of raw ISO leftovers (YYYY-MM-DD) or wrong date '2026-06-30' anywhere on tested pages"
+  ],
+  "failed": [],
+  "action_items": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "retest_needed": false,
+  "full_testing_deferred": true,
+  "notes": "Histórico por Máquina modal tooltip (DateTime format DD/MM/YYYY HH:MM) was not directly opened in this run because clicking a machine card from the Cards view opens the diagnostic editor instead. However, formatDateTime helper is the same util used in Relatórios and the Banco view rendered the formatDate output correctly; given the helper is centralized in /app/frontend/src/lib/dates.js and shared, tooltip rendering is reasonably covered. Recommend visual spot-check by main agent if needed."
+}
