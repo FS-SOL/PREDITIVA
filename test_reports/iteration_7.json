@@ -1,0 +1,43 @@
+{
+  "summary": "Validated vibracao peak rendering and fuzzy 'contém' subconjunto matching. Card ESF-0001 / Motor 01 correctly shows 'Pico: 9.2 mm/s @ 2HV' (max of 1HV=6.36, 1HA=0.85g, 2HV=9.2); other ESF-0001 machines show 'Sem medições'. Medições tab filtered by ESF-0001 / Motor 01 shows exactly 3 rows with correct alarms (1HA=OK, 1HV=A1, 2HV=A2). Backend fuzzy match: importing Subconjunto='MOTOR' (generic) binds to existing composite machine instead of creating a raw-tag stub.",
+  "tested_scope": ["backend", "frontend"],
+  "passed_backend": [
+    "GET /api/measurements returns 3 ESF-0001 / Motor 01 entries (1HV=6.36 mm/s RMS, 1HA=0.85 g Pico, 2HV=9.2 mm/s RMS); all machine_tag values contain '/'",
+    "Peak (max valor) = 2HV @ 9.2 mm/s",
+    "No raw-tag stub machines (tag in ['ESF-0001','ESF-0002']) present in /api/machines?tipo=vibracao",
+    "POST /api/measurements/import with Subconjunto='MOTOR' (uppercase generic) + Equipamento='ESF-0001' → inserted=1, bound to composite machine 'ESF-0001 / Motor 0X' via fuzzy 'contém' branch; no raw 'ESF-0001' stub created",
+    "Cleanup of fuzzy 3HV measurement via DELETE /api/measurements/{id} succeeded"
+  ],
+  "passed_frontend": [
+    "/vibracao admin: 213 vibracao cards rendered",
+    "vibracao-card-ESF-0001 / Motor 01 + vibracao-peak-ESF-0001 / Motor 01 visible; peak text == 'Pico: 9.2 mm/s @ 2HV'",
+    "vibracao-peak-ESF-0001 / Motor 02 text == 'Sem medições' (machine without measurements)",
+    "tab-medicoes + medicoes-machine-filter (native <select>) filter to ESF-0001 / Motor 01 shows exactly 3 rows: 1HA 0.85 g OK, 1HV 6.36 mm/s A1, 2HV 9.2 mm/s A2"
+  ],
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/vibracao Medições tab", "issues": ["Hydration warning in console: '<span> cannot be a child of <option>' caused by visual-editor tooling wrapping <option> children. Not a functional bug but emits a noisy React hydration warning. Likely harmless in production build."]}
+    ]
+  },
+  "critical_code_review_comments": [
+    "import_measurements() fuzzy chain is good (exact subconjunto → contém → composite tag → parent_tag → stub). Consider logging which branch matched per row for traceability.",
+    "Stub auto-creation on /api/measurements/import (raw equip when no composite found) still hides cadastro mistakes; recommend a strict=true query flag that fails the row instead of stub-creating.",
+    "Vibracao.js peakByMachine uses raw '>' comparison across different units (mm/s vs g). Today max is unit-blind which works for ESF-0001 / Motor 01 by coincidence — consider separating peaks per unit/deteccao or labeling unit explicitly to avoid future cross-unit pitfalls."
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_vibracao_peak_and_fuzzy.py",
+    "/app/test_reports/pytest/iter7_results.xml"
+  ],
+  "action_items": [],
+  "updated_files": ["/app/backend/tests/test_vibracao_peak_and_fuzzy.py (new)"],
+  "success_rate": {"backend": "100% (5/5)", "frontend": "100% (3/3 critical flows)"},
+  "test_credentials": "Admin admin@fssolucoes.com/admin123 — functional",
+  "seed_data_creation": "Test created and then DELETED a 3HV measurement on a Motor* machine for fuzzy-match validation. Pre-existing 3 measurements on ESF-0001 / Motor 01 (1HV, 1HA, 2HV) were left untouched.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Regression for the peak/fuzzy slice lives in /app/backend/tests/test_vibracao_peak_and_fuzzy.py. Use REACT_APP_BACKEND_URL env. The medicoes-machine-filter is a native <select>; use page.select_option(label=...). Card/peak data-testid contains spaces and '/': use JS querySelector with double-quoted attribute (e.g. document.querySelector('[data-testid=\"vibracao-card-ESF-0001 / Motor 01\"]')) instead of CSS escaping.",
+  "rca_of_the_issue": "Original complaint (pico ausente) had two root causes the main agent already addressed: (1) measurements were attached to raw-tag stub machines (ESF-0001) instead of composite machines (ESF-0001 / Motor 01), so peakByMachine[m.id] never matched a rendered card; (2) the importer's match chain didn't honor a generic uppercase Subconjunto like 'MOTOR'. Fix verified: stubs were purged, import now matches via fuzzy 'contém' regex on subconjunto, and Vibracao.js correctly computes max valor per machine_id and renders 'Pico: 9.2 mm/s @ 2HV'."
+}

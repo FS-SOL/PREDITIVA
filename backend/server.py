@@ -635,6 +635,12 @@ async def import_measurements(machine_id: Optional[str] = Query(None), file: Upl
                     "parent_tag": {"$regex": f"^{re.escape(equip)}$", "$options": "i"},
                     "subconjunto": {"$regex": f"^{re.escape(sub)}$", "$options": "i"},
                 })
+            if not machine and sub:
+                # fuzzy: subconjunto "contém" (ex: "MOTOR" casa "Motor 01")
+                machine = await db.machines.find_one({
+                    "parent_tag": {"$regex": f"^{re.escape(equip)}$", "$options": "i"},
+                    "subconjunto": {"$regex": re.escape(sub), "$options": "i"},
+                })
             if not machine:
                 # try exact composite tag
                 machine = await db.machines.find_one({"tag": {"$regex": f"^{re.escape(equip)}$", "$options": "i"}})

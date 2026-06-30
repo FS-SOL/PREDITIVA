@@ -42,6 +42,9 @@ Criar software de manutenção preditiva. Login (e-mail/senha + Google) com side
 - Importação de Termografia: botão "Importar Lista" na tela Termografia (POST /api/machines/import detecta aba com TERMO), oculto para visualizador.
 - Testado: backend 8/8 (iteration_5), frontend validado (admin + viewer RBAC).
 
+## Updated (Jun 2026 - parte 3)
+- CORRIGIDO import de Termografia: na planilha real cada linha da aba TERMOGRAFIA é um equipamento próprio (TAG+LOCAL) sem subconjunto. O parser agora ramifica por tipo: termografia trata subconjunto como opcional (tag = TAG crua); vibração mantém tag composta via Descrição. Importou 200 registros de termografia. Validado iteration_6 (backend 13/13, frontend 5/5).
+
 ## Backlog (P1/P2)
 - P1: Login com Google (Emergent Auth)
 - P1: Exportar diagnósticos em PDF/Excel
