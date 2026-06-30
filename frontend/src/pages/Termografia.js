@@ -1,11 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import api from "../lib/api";
+import { useAuth } from "../contexts/AuthContext";
 import { formatDate } from "../lib/dates";
 import StatusBadge from "../components/StatusBadge";
 import { Search, Flame, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Termografia() {
+  const { user } = useAuth();
+  const canEdit = user?.role !== "visualizador";
   const [machines, setMachines] = useState([]);
   const [diagnostics, setDiagnostics] = useState([]);
   const [q, setQ] = useState("");
@@ -48,10 +51,12 @@ export default function Termografia() {
           <p className="text-sm text-slate-500">{filtered.length} pontos de inspeção termográfica</p>
         </div>
         <div className="flex gap-2">
-          <input ref={fileRef} type="file" accept=".xlsx" onChange={upload} className="hidden" data-testid="termo-file-input" />
-          <button data-testid="import-termo-btn" onClick={() => fileRef.current?.click()} className="h-9 px-3 text-sm bg-slate-900 text-white rounded-md flex items-center gap-2 hover:bg-slate-800">
-            <Upload size={14} /> Importar Lista
-          </button>
+          {canEdit && <>
+            <input ref={fileRef} type="file" accept=".xlsx" onChange={upload} className="hidden" data-testid="termo-file-input" />
+            <button data-testid="import-termo-btn" onClick={() => fileRef.current?.click()} className="h-9 px-3 text-sm bg-slate-900 text-white rounded-md flex items-center gap-2 hover:bg-slate-800">
+              <Upload size={14} /> Importar Lista
+            </button>
+          </>}
         </div>
       </div>
 

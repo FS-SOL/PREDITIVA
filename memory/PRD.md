@@ -34,6 +34,14 @@ Criar software de manutenção preditiva. Login (e-mail/senha + Google) com side
 - Cards de vibração mostram "Pico: <valor> <unidade> @ <ponto>".
 - Dashboard já conta subconjuntos (registros individuais) — confirmado, sem alteração necessária.
 
+## Updated (Jun 2026 - parte 2)
+- Aba Medições reformulada: filtro por máquina (dropdown), mostra apenas o VALOR ATUAL por ponto (último por data), preservando o histórico no banco.
+- Tendência por ponto: botão "Ver" abre modal com gráfico da evolução mensal daquele ponto.
+- Excluir medição: botão por linha (DELETE /api/measurements/point/clear) + endpoint DELETE /api/measurements/{id}. Ambos bloqueiam visualizador (403).
+- Pico no card agora usa o valor atual por ponto: "Pico: <valor> <unidade> @ <ponto>".
+- Importação de Termografia: botão "Importar Lista" na tela Termografia (POST /api/machines/import detecta aba com TERMO), oculto para visualizador.
+- Testado: backend 8/8 (iteration_5), frontend validado (admin + viewer RBAC).
+
 ## Backlog (P1/P2)
 - P1: Login com Google (Emergent Auth)
 - P1: Exportar diagnósticos em PDF/Excel
