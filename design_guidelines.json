@@ -1,0 +1,133 @@
+{
+  "project_context": {
+    "app_name": "FS SOLUÇÕES - PREDITIVA",
+    "domain": "Industrial SaaS / Predictive Maintenance Dashboard",
+    "target_audience": "Factory engineers, reliability technicians",
+    "theme": "light",
+    "archetype": "4 (Swiss & High-Contrast)",
+    "language": "PT-BR"
+  },
+  "design_system": {
+    "colors": {
+      "background": "#F8FAFC",
+      "surface": "#FFFFFF",
+      "primary": "#0F172A",
+      "primary_foreground": "#FFFFFF",
+      "secondary": "#F1F5F9",
+      "secondary_foreground": "#0F172A",
+      "border": "#E2E8F0",
+      "text_main": "#0F172A",
+      "text_muted": "#64748B",
+      "status": {
+        "ok": {
+          "bg": "#22C55E",
+          "text": "#FFFFFF",
+          "label": "OK"
+        },
+        "a1": {
+          "bg": "#FACC15",
+          "text": "#854D0E",
+          "label": "A1"
+        },
+        "a2": {
+          "bg": "#F97316",
+          "text": "#FFFFFF",
+          "label": "A2"
+        },
+        "parado": {
+          "bg": "#EF4444",
+          "text": "#FFFFFF",
+          "label": "Parado"
+        }
+      }
+    },
+    "typography": {
+      "font_heading": "Cabinet Grotesk",
+      "font_body": "IBM Plex Sans",
+      "font_mono": "IBM Plex Mono",
+      "hierarchy": {
+        "h1": "text-3xl md:text-4xl font-bold tracking-tight text-slate-900",
+        "h2": "text-xl md:text-2xl font-semibold tracking-tight text-slate-900",
+        "h3": "text-lg font-medium text-slate-800",
+        "body": "text-sm text-slate-700",
+        "label": "text-xs font-semibold tracking-wider uppercase text-slate-500",
+        "data": "font-mono text-sm text-slate-900"
+      }
+    },
+    "spacing_layout": {
+      "base_grid": "grid-cols-1 md:grid-cols-3 lg:grid-cols-4",
+      "gap": "gap-4 or gap-6",
+      "padding": "p-4 or p-6 for cards",
+      "radius": "rounded-md",
+      "borders": "1px solid #E2E8F0",
+      "shadows": "none"
+    },
+    "animation": {
+      "hover": "transition-colors duration-200",
+      "sidebar": "transition-all duration-300 ease-in-out"
+    }
+  },
+  "architecture_and_components": {
+    "layout": {
+      "sidebar": "Collapsible sidebar on the left. Must contain: Dashboard, Hierarquia de Plantas, Máquinas, Biblioteca de Defeitos, Diagnósticos. Background dark (#0F172A) with white text.",
+      "header": "Sticky top header with breadcrumbs, user profile (email/Google), and global search. border-b bg-white."
+    },
+    "pages": [
+      {
+        "name": "Login",
+        "description": "Email/password and Google login. Split screen with industrial hero image on one side."
+      },
+      {
+        "name": "Dashboard Executivo",
+        "description": "Dense KPI grid. Status distribution (OK, A1, A2, Parado) pie/bar charts. Monthly evolution line chart. Main defects list. Health index gauge. Failure probability ranking."
+      },
+      {
+        "name": "Hierarquia de Plantas",
+        "description": "Tree or cascading table view: Empresa -> Unidade -> Área -> Equipamento -> Subconjunto -> Pontos. Option to import Excel."
+      },
+      {
+        "name": "Cadastro de Máquinas",
+        "description": "Data table with search. Columns: TAG, fabricante, RPM, potência, criticidade, status. Option to import Excel list."
+      },
+      {
+        "name": "Análise e Termografia",
+        "description": "Lists for 'Análise de Vibração' and 'Termografia'. Visual cards showing status of each point/machine."
+      },
+      {
+        "name": "Biblioteca de Defeitos",
+        "description": "Catalog of defects (desbalanceamento, desalinhamento, rolamentos BPFO/BPFI/BSF, cavitação, folga, barra quebrada). Table showing symptoms, frequencies, causes, actions, and alarm status toggle."
+      },
+      {
+        "name": "Diagnóstico (3 Colunas)",
+        "description": "3-column interactive layout: Col 1: Select defect -> Col 2: Auto-fills diagnosis/cause/consequence/recommendation -> Col 3: Technician edits and saves."
+      }
+    ],
+    "components": {
+      "status_badge": "Small rectangular badge, rounded-sm, px-2 py-0.5, text-xs font-bold. Color maps to status.",
+      "data_table": "Dense rows (py-2), clear column headers. Hover state on rows (bg-slate-50).",
+      "charts": "Shadcn/Recharts. Use structural gray for axes, primary/status colors for data lines/bars.",
+      "forms": "Use Shadcn UI forms. Clear labels, dense inputs (h-9)."
+    }
+  },
+  "media_urls": {
+    "login_hero": {
+      "url": "https://images.unsplash.com/photo-1717386255773-a456c611dc4e?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1OTN8MHwxfHNlYXJjaHwyfHxwcmVkaWN0aXZlJTIwbWFpbnRlbmFuY2UlMjBtYWNoaW5lfGVufDB8fHx8MTc4Mjc4Mjg0OHww&ixlib=rb-4.1.0&q=85",
+      "description": "Modern industrial machine inside a factory, used for the login split-screen background."
+    },
+    "empty_state_illustration": {
+      "url": "https://images.unsplash.com/photo-1716191299980-a6e8827ba10b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1OTN8MHwxfHNlYXJjaHwxfHxwcmVkaWN0aXZlJTIwbWFpbnRlbmFuY2UlMjBtYWNoaW5lfGVufDB8fHx8MTc4Mjc4Mjg0OHww&ixlib=rb-4.1.0&q=85",
+      "description": "Blue industrial robot arm in factory, used for empty states or dashboard banners."
+    }
+  },
+  "testing_requirements": {
+    "data_testid": "All interactive elements (buttons, inputs, links, tabs) MUST include a data-testid attribute formatted in kebab-case based on their role (e.g., data-testid='login-submit-button', data-testid='sidebar-toggle')."
+  },
+  "technical_notes": {
+    "file_extensions": "Use .js and .jsx files. Do not use .tsx or TypeScript.",
+    "libraries": [
+      "yarn add @phosphor-icons/react",
+      "yarn add recharts",
+      "yarn add clsx tailwind-merge"
+    ]
+  }
+}
