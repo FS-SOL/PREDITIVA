@@ -3,7 +3,7 @@ import api from "../lib/api";
 import { formatDate, formatDateTime } from "../lib/dates";
 import { useAuth } from "../contexts/AuthContext";
 import StatusBadge from "../components/StatusBadge";
-import { Search, Save, History, X } from "lucide-react";
+import { Search, Save, History, X, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 const STATUS_COLOR = { OK: "#22C55E", A1: "#FACC15", A2: "#F97316", Parado: "#EF4444", "Sem diag.": "#94A3B8" };
@@ -146,7 +146,7 @@ export default function Diagnostico() {
           </div>
           <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
             <table className="fs-table">
-              <thead><tr><th>Data</th><th>TAG</th><th>Diagnóstico</th><th>Recomendação</th><th>Status</th><th>Técnico</th></tr></thead>
+              <thead><tr><th>Data</th><th>TAG</th><th>Diagnóstico</th><th>Recomendação</th><th>Status</th><th>Técnico</th><th></th></tr></thead>
               <tbody>
                 {historyFiltered.map((d) => (
                   <tr key={d.id}>
@@ -156,9 +156,10 @@ export default function Diagnostico() {
                     <td className="text-xs max-w-[300px]">{d.recomendacao}</td>
                     <td><StatusBadge status={d.status} /></td>
                     <td className="text-xs">{d.tecnico}</td>
+                    <td>{canEdit && <button data-testid={`del-diag-${d.id}`} onClick={async () => { if (window.confirm('Excluir diagnóstico?')) { await api.delete(`/diagnostics/${d.id}`); toast.success('Excluído'); load(); } }} className="p-1 hover:bg-red-100 rounded text-red-600"><Trash2 size={14} /></button>}</td>
                   </tr>
                 ))}
-                {historyFiltered.length === 0 && <tr><td colSpan={6} className="text-center text-slate-500 py-6">Nenhum diagnóstico</td></tr>}
+                {historyFiltered.length === 0 && <tr><td colSpan={7} className="text-center text-slate-500 py-6">Nenhum diagnóstico</td></tr>}
               </tbody>
             </table>
           </div>

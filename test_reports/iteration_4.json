@@ -1,0 +1,19 @@
+{
+  "summary": "Validated diagnostic deletion feature in /diagnostico > Banco. Admin can delete via trash icon with data-testid del-diag-{id}, viewer cannot see trash icons and is blocked at API level with 403.",
+  "tested_scope": ["frontend", "backend", "auth", "integration"],
+  "passed": [
+    "Admin login + GET /api/machines (213 machines)",
+    "POST /api/diagnostics (admin) returns 200 with new diag id",
+    "DELETE /api/diagnostics/{id} as viewer returns 403 with message 'Permissão negada: usuário somente leitura'",
+    "DELETE /api/diagnostics/{id} as admin returns 200 {ok:true}",
+    "GET /api/diagnostics confirms deleted item removed from list",
+    "UI: /diagnostico > Banco tab shows table with 7 header columns",
+    "UI: trash button [data-testid=del-diag-{id}] renders for admin and clicking it (with confirm accepted) removes the row from UI + backend",
+    "UI: viewer (viewer@fs.com) loads /diagnostico > Banco; zero trash buttons rendered (canEdit=false enforced)"
+  ],
+  "failed": [],
+  "action_items": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "retest_needed": false,
+  "full_testing_deferred": true
+}
