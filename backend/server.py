@@ -74,12 +74,17 @@ async def get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Usuário não encontrado")
     return user
 
+def require_editor(user=Depends(get_current_user)) -> dict:
+    if user.get("role") == "visualizador":
+        raise HTTPException(status_code=403, detail="Permissão negada: usuário somente leitura")
+    return user
+
 # ============== Models ==============
 class UserCreate(BaseModel):
     email: EmailStr
     password: str
     name: str
-    role: str = "tecnico"  # admin, tecnico, gestor
+    role: str = "tecnico"  # admin, tecnico, gestor, visualizador
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -264,7 +269,7 @@ async def list_plants(user=Depends(get_current_user)):
     return nodes
 
 @api.post("/plants")
-async def create_plant(payload: PlantNode, user=Depends(get_current_user)):
+async def create_plant(payload: PlantNode, user=Depends(require_editor)):
     doc = payload.model_dump()
     doc["id"] = str(uuid.uuid4())
     doc["created_at"] = now_iso()
@@ -273,7 +278,7 @@ async def create_plant(payload: PlantNode, user=Depends(get_current_user)):
     return doc
 
 @api.put("/plants/{node_id}")
-async def update_plant(node_id: str, payload: PlantNode, user=Depends(get_current_user)):
+async def update_plant(node_id: str, payload: PlantNode, user=Depends(require_editor)):
     update = {k: v for k, v in payload.model_dump().items() if v is not None and k != "id"}
     res = await db.plant_nodes.update_one({"id": node_id}, {"$set": update})
     if not res.matched_count:
@@ -281,7 +286,7 @@ async def update_plant(node_id: str, payload: PlantNode, user=Depends(get_curren
     return {"ok": True}
 
 @api.delete("/plants/{node_id}")
-async def delete_plant(node_id: str, user=Depends(get_current_user)):
+async def delete_plant(node_id: str, user=Depends(require_editor)):
     await db.plant_nodes.delete_one({"id": node_id})
     return {"ok": True}
 
@@ -304,7 +309,7 @@ async def list_machines(q: Optional[str] = None, tipo: Optional[str] = None, sta
     return items
 
 @api.post("/machines")
-async def create_machine(payload: MachineModel, user=Depends(get_current_user)):
+async def create_machine(payload: MachineModel, user=Depends(require_editor)):
     doc = payload.model_dump()
     doc["id"] = str(uuid.uuid4())
     doc["created_at"] = now_iso()
@@ -315,7 +320,7 @@ async def create_machine(payload: MachineModel, user=Depends(get_current_user)):
     return doc
 
 @api.put("/machines/{machine_id}")
-async def update_machine(machine_id: str, payload: MachineModel, user=Depends(get_current_user)):
+async def update_machine(machine_id: str, payload: MachineModel, user=Depends(require_editor)):
     update = {k: v for k, v in payload.model_dump().items() if k != "id"}
     res = await db.machines.update_one({"id": machine_id}, {"$set": update})
     if not res.matched_count:
@@ -323,13 +328,13 @@ async def update_machine(machine_id: str, payload: MachineModel, user=Depends(ge
     return {"ok": True}
 
 @api.delete("/machines/{machine_id}")
-async def delete_machine(machine_id: str, user=Depends(get_current_user)):
+async def delete_machine(machine_id: str, user=Depends(require_editor)):
     await db.machines.delete_one({"id": machine_id})
     await db.measurements.delete_many({"machine_id": machine_id})
     return {"ok": True}
 
 @api.post("/machines/import")
-async def import_machines(file: UploadFile = File(...), user=Depends(get_current_user)):
+async def import_machines(file: UploadFile = File(...), user=Depends(require_editor)):
     content = await file.read()
     wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
     inserted = 0
@@ -394,7 +399,7 @@ async def list_defects(user=Depends(get_current_user)):
     return items
 
 @api.post("/defects")
-async def create_defect(payload: DefectModel, user=Depends(get_current_user)):
+async def create_defect(payload: DefectModel, user=Depends(require_editor)):
     doc = payload.model_dump()
     doc["id"] = str(uuid.uuid4())
     doc["created_at"] = now_iso()
@@ -403,7 +408,7 @@ async def create_defect(payload: DefectModel, user=Depends(get_current_user)):
     return doc
 
 @api.put("/defects/{defect_id}")
-async def update_defect(defect_id: str, payload: DefectModel, user=Depends(get_current_user)):
+async def update_defect(defect_id: str, payload: DefectModel, user=Depends(require_editor)):
     update = {k: v for k, v in payload.model_dump().items() if k != "id"}
     res = await db.defects.update_one({"id": defect_id}, {"$set": update})
     if not res.matched_count:
@@ -411,7 +416,7 @@ async def update_defect(defect_id: str, payload: DefectModel, user=Depends(get_c
     return {"ok": True}
 
 @api.delete("/defects/{defect_id}")
-async def delete_defect(defect_id: str, user=Depends(get_current_user)):
+async def delete_defect(defect_id: str, user=Depends(require_editor)):
     await db.defects.delete_one({"id": defect_id})
     return {"ok": True}
 
@@ -429,7 +434,7 @@ async def list_diagnostics(q: Optional[str] = None, user=Depends(get_current_use
     return items
 
 @api.post("/diagnostics")
-async def create_diagnostic(payload: DiagnosticoModel, user=Depends(get_current_user)):
+async def create_diagnostic(payload: DiagnosticoModel, user=Depends(require_editor)):
     doc = payload.model_dump()
     doc["id"] = str(uuid.uuid4())
     doc["data"] = now_iso()
@@ -441,7 +446,7 @@ async def create_diagnostic(payload: DiagnosticoModel, user=Depends(get_current_
     return doc
 
 @api.put("/diagnostics/{diag_id}")
-async def update_diagnostic(diag_id: str, payload: DiagnosticoModel, user=Depends(get_current_user)):
+async def update_diagnostic(diag_id: str, payload: DiagnosticoModel, user=Depends(require_editor)):
     update = {k: v for k, v in payload.model_dump().items() if k not in ("id",)}
     res = await db.diagnostics.update_one({"id": diag_id}, {"$set": update})
     if not res.matched_count:
@@ -450,7 +455,7 @@ async def update_diagnostic(diag_id: str, payload: DiagnosticoModel, user=Depend
     return {"ok": True}
 
 @api.delete("/diagnostics/{diag_id}")
-async def delete_diagnostic(diag_id: str, user=Depends(get_current_user)):
+async def delete_diagnostic(diag_id: str, user=Depends(require_editor)):
     await db.diagnostics.delete_one({"id": diag_id})
     return {"ok": True}
 
@@ -464,7 +469,7 @@ async def list_measurements(machine_id: Optional[str] = None, user=Depends(get_c
     return items
 
 @api.post("/measurements/import")
-async def import_measurements(machine_id: Optional[str] = Query(None), file: UploadFile = File(...), user=Depends(get_current_user)):
+async def import_measurements(machine_id: Optional[str] = Query(None), file: UploadFile = File(...), user=Depends(require_editor)):
     content = await file.read()
     wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
     ws = wb[wb.sheetnames[0]]
@@ -518,7 +523,7 @@ async def import_measurements(machine_id: Optional[str] = Query(None), file: Upl
     return {"inserted": inserted}
 
 @api.post("/measurements")
-async def create_measurement(payload: MeasurementModel, user=Depends(get_current_user)):
+async def create_measurement(payload: MeasurementModel, user=Depends(require_editor)):
     doc = payload.model_dump()
     doc["id"] = str(uuid.uuid4())
     doc["data"] = now_iso()
@@ -586,6 +591,60 @@ async def dashboard(user=Depends(get_current_user)):
         "failure_ranking": ranking,
         "total_diagnostics": len(diagnostics),
     }
+
+# ============== Reports ==============
+@api.get("/reports/summary")
+async def report_summary(user=Depends(get_current_user)):
+    """Resumo executivo: KPIs + status + top defeitos."""
+    machines = await db.machines.find({}, {"_id": 0}).to_list(10000)
+    diagnostics = await db.diagnostics.find({}, {"_id": 0}).sort("data", -1).to_list(5000)
+    defects = await db.defects.find({}, {"_id": 0}).to_list(2000)
+    id_to_name = {d["id"]: d["nome"] for d in defects}
+    status_dist = {"OK": 0, "A1": 0, "A2": 0, "Parado": 0}
+    for m in machines:
+        status_dist[m.get("status", "OK")] = status_dist.get(m.get("status", "OK"), 0) + 1
+    weight = {"OK": 100, "A1": 70, "A2": 40, "Parado": 0}
+    health = sum(weight.get(m.get("status", "OK"), 0) for m in machines) / max(len(machines), 1)
+    defect_counter: Dict[str, int] = {}
+    for d in diagnostics:
+        for did in d.get("defect_ids", []):
+            defect_counter[did] = defect_counter.get(did, 0) + 1
+    top_defects = sorted(
+        [{"nome": id_to_name.get(k, k), "count": v} for k, v in defect_counter.items()],
+        key=lambda x: x["count"], reverse=True,
+    )[:5]
+    critical = [
+        {"tag": m.get("tag"), "equipamento": m.get("equipamento", ""), "local": m.get("local", ""), "status": m.get("status")}
+        for m in machines if m.get("status") in ("A2", "Parado")
+    ]
+    return {
+        "generated_at": now_iso(),
+        "total_machines": len(machines),
+        "status_dist": status_dist,
+        "health_index": round(health, 1),
+        "top_defects": top_defects,
+        "critical_machines": critical,
+        "total_diagnostics": len(diagnostics),
+    }
+
+@api.get("/reports/complete")
+async def report_complete(user=Depends(get_current_user)):
+    """Relatório completo: tudo do resumo + lista de todos os diagnósticos com detalhes."""
+    summary = await report_summary(user)
+    diagnostics = await db.diagnostics.find({}, {"_id": 0}).sort("data", -1).to_list(5000)
+    machines = await db.machines.find({}, {"_id": 0}).to_list(10000)
+    machine_map = {m["id"]: m for m in machines}
+    enriched = []
+    for d in diagnostics:
+        m = machine_map.get(d.get("machine_id"), {})
+        enriched.append({**d, "equipamento": m.get("equipamento", ""), "local": m.get("local", ""), "criticidade": m.get("criticidade", "")})
+    return {**summary, "diagnostics": enriched, "machines": machines}
+
+@api.get("/machines/{machine_id}/history")
+async def machine_history(machine_id: str, user=Depends(get_current_user)):
+    diags = await db.diagnostics.find({"machine_id": machine_id}, {"_id": 0}).sort("data", 1).to_list(1000)
+    return diags
+
 
 # ============== Mount ==============
 app.include_router(api)

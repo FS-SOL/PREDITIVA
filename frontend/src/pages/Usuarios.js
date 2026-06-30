@@ -78,6 +78,7 @@ export default function Usuarios() {
                 <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} className="mt-1 w-full h-9 px-3 border border-slate-300 rounded-md text-sm bg-white">
                   <option value="tecnico">Técnico</option>
                   <option value="gestor">Gestor</option>
+                  <option value="visualizador">Visualizador (somente leitura)</option>
                   <option value="admin">Administrador</option>
                 </select>
               </div>

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import api from "../lib/api";
+import { useAuth } from "../contexts/AuthContext";
 import StatusBadge from "../components/StatusBadge";
 import { Plus, Search, Upload, Edit2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -11,6 +12,8 @@ const emptyMachine = {
 };
 
 export default function Maquinas() {
+  const { user } = useAuth();
+  const canEdit = user?.role !== "visualizador";
   const [items, setItems] = useState([]);
   const [q, setQ] = useState("");
   const [tipo, setTipo] = useState("todos");
@@ -68,12 +71,16 @@ export default function Maquinas() {
         </div>
         <div className="flex gap-2">
           <input ref={fileRef} type="file" accept=".xlsx" onChange={uploadFile} className="hidden" data-testid="machine-file-input" />
-          <button data-testid="import-machines-btn" onClick={() => fileRef.current?.click()} className="h-9 px-3 text-sm bg-white border border-slate-300 rounded-md flex items-center gap-2 hover:bg-slate-50">
-            <Upload size={14} /> Importar Excel
-          </button>
-          <button data-testid="new-machine-btn" onClick={() => setEditing({ ...emptyMachine })} className="h-9 px-3 text-sm bg-slate-900 text-white rounded-md flex items-center gap-2 hover:bg-slate-800">
-            <Plus size={14} /> Nova Máquina
-          </button>
+          {canEdit && (
+            <>
+              <button data-testid="import-machines-btn" onClick={() => fileRef.current?.click()} className="h-9 px-3 text-sm bg-white border border-slate-300 rounded-md flex items-center gap-2 hover:bg-slate-50">
+                <Upload size={14} /> Importar Excel
+              </button>
+              <button data-testid="new-machine-btn" onClick={() => setEditing({ ...emptyMachine })} className="h-9 px-3 text-sm bg-slate-900 text-white rounded-md flex items-center gap-2 hover:bg-slate-800">
+                <Plus size={14} /> Nova Máquina
+              </button>
+            </>
+          )}
         </div>
       </div>
 

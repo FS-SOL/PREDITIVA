@@ -126,6 +126,7 @@ export default function Login() {
               >
                 <option value="tecnico">Técnico</option>
                 <option value="gestor">Gestor</option>
+                <option value="visualizador">Visualizador</option>
                 <option value="admin">Administrador</option>
               </select>
             </div>

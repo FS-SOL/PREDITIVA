@@ -13,17 +13,19 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
+  FileText,
 } from "lucide-react";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, testid: "nav-dashboard" },
-  { to: "/plantas", label: "Plantas", icon: Network, testid: "nav-plantas" },
+  { to: "/plantas", label: "Plantas", icon: Network, testid: "nav-plantas", admin: true },
   { to: "/maquinas", label: "Máquinas", icon: Cog, testid: "nav-maquinas" },
   { to: "/vibracao", label: "Análise Vibração", icon: Activity, testid: "nav-vibracao" },
   { to: "/termografia", label: "Termografia", icon: Flame, testid: "nav-termografia" },
-  { to: "/defeitos", label: "Biblioteca Defeitos", icon: BookOpen, testid: "nav-defeitos" },
+  { to: "/defeitos", label: "Biblioteca Defeitos", icon: BookOpen, testid: "nav-defeitos", admin: true },
   { to: "/diagnostico", label: "Diagnóstico", icon: Stethoscope, testid: "nav-diagnostico" },
-  { to: "/usuarios", label: "Usuários", icon: Users, testid: "nav-usuarios" },
+  { to: "/relatorios", label: "Relatórios", icon: FileText, testid: "nav-relatorios" },
+  { to: "/usuarios", label: "Usuários", icon: Users, testid: "nav-usuarios", admin: true },
 ];
 
 export default function Layout() {
@@ -56,7 +58,7 @@ export default function Layout() {
         </div>
 
         <nav className="flex-1 px-2 py-3 space-y-0.5">
-          {NAV.map((n) => (
+          {NAV.filter((n) => !(n.admin && user?.role === "visualizador")).map((n) => (
             <NavLink
               key={n.to}
               to={n.to}
