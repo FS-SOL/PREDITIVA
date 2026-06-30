@@ -431,13 +431,22 @@ async def import_machines(file: UploadFile = File(...), user=Depends(require_edi
             if not cur_tag:
                 continue
 
-            # Subconjunto: vibração = Descrição, termografia = Componente
-            sub = (str(raw_desc).strip() if raw_desc else "") or (str(raw_comp).strip() if raw_comp else "")
-            if not sub:
-                # No subconjunto info — skip (avoids duplicate parent rows)
-                continue
+            is_primary = bool(raw_tag and raw_local)
 
-            full_tag = f"{cur_tag} / {sub}"
+            if tipo == "termografia":
+                # Termografia: cada linha (TAG+LOCAL) é um ponto/equipamento próprio.
+                # Componente é opcional; se vazio, a própria TAG é o registro.
+                sub = str(raw_comp).strip() if raw_comp else ""
+                if not is_primary and not sub:
+                    continue
+                full_tag = cur_tag if not sub else f"{cur_tag} / {sub}"
+            else:
+                # Vibração: subconjunto vem da Descrição (obrigatório)
+                sub = (str(raw_desc).strip() if raw_desc else "") or (str(raw_comp).strip() if raw_comp else "")
+                if not sub:
+                    # No subconjunto info — skip (avoids duplicate parent rows)
+                    continue
+                full_tag = f"{cur_tag} / {sub}"
 
             try:
                 doc = {

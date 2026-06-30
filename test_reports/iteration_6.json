@@ -1,0 +1,38 @@
+{
+  "summary": "Validated termografia import fix using real /tmp/todas.xlsx. Backend now imports 200 termo records (each TAG row, subconjunto optional) and vibracao remains at 215 composite-tag machines. Reimport is idempotent (inserted=0, skipped=200). Frontend gating fixed: admin sees Importar Lista + 200 cards (incl. QDE-229.01, TRF-0001); viewer correctly hides import-termo-btn (count=0) while still seeing the 200 read-only cards.",
+  "tested_scope": ["backend", "frontend", "regression", "rbac"],
+  "passed_backend": [
+    "POST /api/machines/import with /tmp/todas.xlsx (sheet TERMOGRAFIA) imports 200 records (inserted+skipped = 200)",
+    "GET /api/machines?tipo=termografia returns 200 records; sample TAGs QDE-229.01 and TRF-0001 present; tipo=termografia; tag = raw TAG; _id excluded",
+    "Reimport of /tmp/todas.xlsx is idempotent: inserted=0, skipped=200",
+    "GET /api/machines?tipo=vibracao still returns 215 composite-tag machines ({parent_tag} / {subconjunto}) — vibracao path unbroken",
+    "Prior regression suite /app/backend/tests/test_vibracao_termo.py — 8/8 still passing (template, ISO alarm classification, RBAC delete viewer/admin, point/clear, synthetic termo sheet)"
+  ],
+  "passed_frontend": [
+    "Admin /termografia: import-termo-btn visible (count=1)",
+    "Admin /termografia: 200 termo-card-* rendered; termo-card-TRF-0001 and termo-card-QDE-229.01 both present (count=1 each)",
+    "Viewer /termografia: import-termo-btn HIDDEN (count=0) — gating fix from iteration_5 confirmed",
+    "Viewer /termografia: still sees 200 termo cards (read-only flow OK)",
+    "Sidebar correctly hides admin items (Plantas, Biblioteca Defeitos, Usuários) for viewer"
+  ],
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "critical_code_review_comments": [
+    "import_machines() in server.py is ~100 lines with branching by tipo — readable now but consider extracting termo vs vibracao row handlers when adding 'ambos' support so the SRP stays clean.",
+    "Stub-machine auto-creation on /api/measurements/import (carry-over from iter5 review) still applies — masks miscadastro; consider a strict_match flag.",
+    "Termografia.js upload error handler ignores HTTP status. A 413/500 response will surface the same generic 'Falha ao importar' toast. Surface err.response?.data?.detail for better UX."
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_termo_real_import.py",
+    "/app/backend/tests/test_vibracao_termo.py",
+    "/app/test_reports/pytest/iter6_results.xml"
+  ],
+  "action_items": [],
+  "updated_files": ["/app/backend/tests/test_termo_real_import.py (new)"],
+  "success_rate": {"backend": "100% (13/13 across both pytest files)", "frontend": "100% (5/5 admin+viewer termo checks)"},
+  "test_credentials": "Admin admin@fssolucoes.com/admin123, Viewer viewer@fs.com/viewer123 — both functional",
+  "seed_data_creation": "/tmp/todas.xlsx was imported into DB (200 termografia + 215 vibracao machines). These are the user's intended production-like dataset and were NOT cleaned up — reimport is idempotent so this is safe.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend regression for termo/vibracao import lives in /app/backend/tests/test_termo_real_import.py (uses /tmp/todas.xlsx) and /app/backend/tests/test_vibracao_termo.py (synthetic). Run: `pytest backend/tests/ -v -o addopts=` from /app. DB is already seeded with 200 termo + 215 vibracao after this iteration."
+}
