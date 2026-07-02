@@ -15,6 +15,7 @@ import {
   ChevronRight,
   FileText,
   ShieldAlert,
+  BookText,
 } from "lucide-react";
 
 const NAV = [
@@ -27,6 +28,7 @@ const NAV = [
   { to: "/diagnostico", label: "Diagnóstico", icon: Stethoscope, testid: "nav-diagnostico" },
   { to: "/relatorios", label: "Relatórios", icon: FileText, testid: "nav-relatorios" },
   { to: "/auditoria", label: "Auditoria", icon: ShieldAlert, testid: "nav-auditoria", adminOnly: true },
+  { to: "/manual", label: "Manual", icon: BookText, testid: "nav-manual", adminOnly: true },
   { to: "/usuarios", label: "Usuários", icon: Users, testid: "nav-usuarios", admin: true },
 ];
 

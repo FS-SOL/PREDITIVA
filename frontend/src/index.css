@@ -92,3 +92,19 @@ table.fs-table { width: 100%; border-collapse: collapse; }
 table.fs-table th { text-align: left; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: #64748B; padding: 0.625rem 0.875rem; border-bottom: 1px solid var(--border); background: #F8FAFC; }
 table.fs-table td { padding: 0.625rem 0.875rem; border-bottom: 1px solid var(--border); font-size: 0.875rem; }
 table.fs-table tr:hover td { background: #F8FAFC; }
+
+/* Manual (markdown) */
+.manual-prose { color: #1e293b; font-size: 0.9rem; line-height: 1.65; }
+.manual-prose h1 { font-size: 1.6rem; font-weight: 700; color: #0f172a; border-bottom: 2px solid #0f172a; padding-bottom: 0.4rem; margin: 0 0 1rem; }
+.manual-prose h2 { font-size: 1.2rem; font-weight: 700; color: #0f172a; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.3rem; margin: 1.6rem 0 0.7rem; }
+.manual-prose h3 { font-size: 1.02rem; font-weight: 600; color: #334155; margin: 1rem 0 0.5rem; }
+.manual-prose p { margin: 0.5rem 0; }
+.manual-prose ul, .manual-prose ol { margin: 0.4rem 0 0.6rem 1.3rem; }
+.manual-prose li { margin: 0.2rem 0; }
+.manual-prose strong { color: #0f172a; }
+.manual-prose code { background: #f1f5f9; padding: 0.05rem 0.3rem; border-radius: 4px; font-size: 0.82rem; }
+.manual-prose hr { border: none; border-top: 1px solid #e2e8f0; margin: 1.4rem 0; }
+.manual-prose table { border-collapse: collapse; width: 100%; margin: 0.7rem 0; }
+.manual-prose th, .manual-prose td { border: 1px solid #cbd5e1; padding: 0.45rem 0.6rem; font-size: 0.82rem; text-align: left; }
+.manual-prose th { background: #0f172a; color: #fff; }
+.manual-prose tr:nth-child(even) td { background: #f8fafc; }

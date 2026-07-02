@@ -642,6 +642,39 @@ async def list_deletions(user=Depends(require_admin)):
     items = await db.deletion_logs.find({}, {"_id": 0}).sort("data", -1).to_list(3000)
     return items
 
+# ============== Manual (admin) ==============
+MANUAL_PATH = ROOT_DIR.parent / "MANUAL.md"
+
+@api.get("/manual")
+async def get_manual(user=Depends(require_admin)):
+    text = MANUAL_PATH.read_text(encoding="utf-8") if MANUAL_PATH.exists() else "# Manual\nManual não disponível."
+    return {"markdown": text}
+
+@api.get("/manual/pdf")
+async def get_manual_pdf(user=Depends(require_admin)):
+    from starlette.responses import StreamingResponse
+    import markdown as _md
+    from xhtml2pdf import pisa
+    text = MANUAL_PATH.read_text(encoding="utf-8") if MANUAL_PATH.exists() else "# Manual\nManual não disponível."
+    body = _md.markdown(text, extensions=["tables", "fenced_code"])
+    html = f"""<html><head><meta charset="utf-8"><style>
+      @page {{ size: A4; margin: 1.8cm; }}
+      body {{ font-family: Helvetica, Arial, sans-serif; font-size: 10.5pt; color: #1e293b; line-height: 1.5; }}
+      h1 {{ font-size: 20pt; color: #0f172a; border-bottom: 2px solid #0f172a; padding-bottom: 4px; }}
+      h2 {{ font-size: 14pt; color: #0f172a; margin-top: 18px; border-bottom: 1px solid #cbd5e1; padding-bottom: 3px; }}
+      h3 {{ font-size: 11.5pt; color: #334155; margin-top: 12px; }}
+      table {{ border-collapse: collapse; width: 100%; margin: 8px 0; }}
+      th, td {{ border: 1px solid #cbd5e1; padding: 5px 7px; font-size: 9.5pt; text-align: left; }}
+      th {{ background: #0f172a; color: #ffffff; }}
+      code {{ background: #f1f5f9; padding: 1px 3px; }}
+      ul {{ margin: 4px 0 4px 16px; }}
+    </style></head><body>{body}</body></html>"""
+    buf = io.BytesIO()
+    pisa.CreatePDF(io.StringIO(html), dest=buf, encoding="utf-8")
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="application/pdf",
+                             headers={"Content-Disposition": "attachment; filename=manual_fs_solucoes.pdf"})
+
 @api.get("/measurements/template")
 async def measurements_template(user=Depends(get_current_user)):
     """Gera um .xlsx pré-preenchido com todas as máquinas de vibração."""

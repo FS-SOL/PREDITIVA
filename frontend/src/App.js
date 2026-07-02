@@ -15,6 +15,7 @@ import Diagnostico from "./pages/Diagnostico";
 import Usuarios from "./pages/Usuarios";
 import Relatorios from "./pages/Relatorios";
 import Auditoria from "./pages/Auditoria";
+import Manual from "./pages/Manual";
 
 const Protected = ({ children }) => {
   const { user } = useAuth();
@@ -52,6 +53,7 @@ export default function App() {
             <Route path="/diagnostico" element={<Diagnostico />} />
             <Route path="/relatorios" element={<Relatorios />} />
             <Route path="/auditoria" element={<Auditoria />} />
+            <Route path="/manual" element={<Manual />} />
             <Route path="/usuarios" element={<Usuarios />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

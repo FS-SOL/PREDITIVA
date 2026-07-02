@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 12 — Manual page + PDF + admin-only RBAC tested end-to-end. Backend 6/6 pytest pass, Frontend admin/viewer flows verified.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter12_manual.py",
+    "/app/test_reports/pytest/iter12_manual.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Optional (minor UX): the 'Baixar PDF' button in Manual.js is unconditionally rendered even for non-admin users who hit the route directly. Backend correctly returns 403 and a toast error appears, so functionality is safe. Consider guarding the button and page with a client-side role check for a cleaner UX (currently the empty page + toast is shown briefly before user leaves).",
+    "server.py: /api/manual/pdf loads MANUAL.md and rebuilds HTML+PDF on every request. For a static manual, consider caching the generated PDF bytes in memory (invalidate on file mtime) to reduce CPU/latency."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter12_manual.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (6/6 pytest)",
+    "frontend": "100% (admin sidebar nav-manual + /manual page render markdown 8181 chars, 32 headings, 2 tables + PDF download 19KB %PDF; viewer no nav-manual/nav-auditoria + 403 on /manual with error toast, no crash)"
+  },
+  "test_credentials": "Admin admin@fssolucoes.com/admin123 (seeded); viewer@fs.com/viewer123 (idempotently created via /api/auth/register with role=visualizador in test setup).",
+  "seed_data_creation": "Registered viewer@fs.com (role=visualizador) — persisted user for RBAC tests. No other seed data modified.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Manual feature validated. viewer@fs.com/viewer123 is persisted in DB (visualizador role) and can be reused for future RBAC checks. Backend endpoints: GET /api/manual returns {markdown} for admin (9105+ chars actual, tested >5000), 403 for viewer, 401 unauth. GET /api/manual/pdf returns 19KB application/pdf starting with %PDF for admin, 403 for viewer. Frontend Manual.js uses ReactMarkdown+remarkGfm and axios blob download. Layout.js correctly hides nav-manual and nav-auditoria for non-admin roles (adminOnly flag).",
+  "rca of the issue": "N/A — no bugs found."
+}
