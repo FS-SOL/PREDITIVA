@@ -93,21 +93,21 @@ export default function Vibracao() {
       .filter((m) => !q || [m.machine_tag, m.subconjunto, m.ponto, m.deteccao].some((v) => (v || "").toLowerCase().includes(q.toLowerCase())));
   }, [latestByPoint, machineFilter, q]);
 
-  // Pivot: linhas = equipamento/ponto, colunas = cada importação (data+hora)
+  // Pivot: linhas = equipamento/ponto, colunas = coleta (agrupadas por minuto)
   const pivot = useMemo(() => {
     const src = measurements
       .filter((m) => machineFilter === "todas" || m.machine_id === machineFilter)
       .filter((m) => !q || [m.machine_tag, m.ponto, m.deteccao].some((v) => (v || "").toLowerCase().includes(q.toLowerCase())));
-    const colSet = new Set();
+    const colMeta = {};
     const rowMap = {};
     for (const m of src) {
-      const col = m.data || "";
-      colSet.add(col);
+      const colKey = formatDateTime(m.data);
+      if (!(colKey in colMeta) || (m.data || "") < colMeta[colKey]) colMeta[colKey] = m.data || "";
       const key = `${m.machine_id}||${m.ponto}||${m.deteccao}`;
       if (!rowMap[key]) rowMap[key] = { machine_tag: m.machine_tag, ponto: m.ponto, deteccao: m.deteccao, unidade: m.unidade, ordem: m.ordem || 0, values: {} };
-      rowMap[key].values[col] = m.valor;
+      rowMap[key].values[colKey] = m.valor;
     }
-    const cols = Array.from(colSet).sort((a, b) => (a || "").localeCompare(b || ""));
+    const cols = Object.keys(colMeta).sort((a, b) => (colMeta[a] || "").localeCompare(colMeta[b] || ""));
     const rows = Object.values(rowMap).sort((a, b) => (a.machine_tag || "").localeCompare(b.machine_tag || "") || (a.ordem - b.ordem));
     return { cols, rows };
   }, [measurements, machineFilter, q]);
@@ -356,7 +356,7 @@ export default function Vibracao() {
               <tr>
                 <th className="sticky left-0 bg-slate-100 z-10">Equipamento</th>
                 <th>Ponto</th><th>Detecção</th><th>Un.</th>
-                {pivot.cols.map((c) => <th key={c} className="whitespace-nowrap text-center">{formatDateTime(c)}</th>)}
+                {pivot.cols.map((c) => <th key={c} className="whitespace-nowrap text-center">{c}</th>)}
               </tr>
             </thead>
             <tbody>

@@ -1,0 +1,44 @@
+{
+  "summary": "Iter11 validated the BUG-FIX for 'escada' effect on Vibração/Termografia 'Tabela de Dados'. Backend: import_measurements & import_thermal now share a single batch_ts across all rows of the same upload (fixed line-per-microsecond bug). Frontend/backend pivot groups columns by MINUTE (_fmt_dt for xlsx export / formatDateTime for UI). 8/8 backend pytest tests pass. Frontend Playwright: BBA-0001/Motor pivot shows 5 minute-columns (was ~42 escada), ESF-0001/Motor 01 preserves 4 distinct minute-columns (including 2 columns on 15/06 at 09:00 and 15:30 — same day, different minute not collapsed), QDE-229.01 termografia shows 3 minute-columns (10/04, 10/05, 10/06) with Fase R (55/68/95) and Fase S (52/60/72) fully populated. Two-import test confirms distinct imports still produce distinct timestamps (no over-collapse). Excel exports (/api/measurements/export, /api/thermal/export) return 200 xlsx with no duplicate date-column headers.",
+  "tested_scope": ["backend", "frontend"],
+  "passed_backend": [
+    "POST /api/measurements/import with 8 pontos on one machine → all 8 rows share exactly 1 distinct 'data' value (batch_ts)",
+    "Two consecutive POST /api/measurements/import calls (1.1s apart) → produce exactly 2 distinct 'data' timestamps (no incorrect merge across imports)",
+    "POST /api/thermal/import with 5 pontos on one machine → all rows share 1 distinct 'data' value",
+    "GET /api/measurements/export → 200 xlsx; header prefix ['Equipamento','Ponto','Detecção','Unidade']; no duplicate date-column headers",
+    "GET /api/measurements/export?machine_id=<BBA> → date-column count equals count of distinct MINUTE keys derived from raw timestamps (proves _fmt_dt grouping)",
+    "GET /api/thermal/export → 200 xlsx; no duplicate date-column headers",
+    "GET /api/thermal/export?machine_id=<QDE> → exactly 3 date columns",
+    "GET /api/measurements/export?machine_id=<ESF> → exactly 4 date columns (different-minute same-day not collapsed)"
+  ],
+  "passed_frontend": [
+    "/vibracao Tabela de Dados — BBA-0001/Motor pivot: 5 minute-columns (08:46, 09:15, 09:16, 09:23, 10:10), 9 point rows, no duplicates → escada eliminated",
+    "/vibracao Tabela de Dados — ESF-0001/Motor 01 pivot: 4 minute-columns (15/04 09:00, 15/05 09:00, 15/06 09:00, 15/06 15:30); 1HV fills all 4 with 3.1/5.8/9.2/10.5; 1HA and 2HV fill only 3 columns each",
+    "/termografia Tabela de Dados — QDE-229.01 pivot: 3 minute-columns (10/04, 10/05, 10/06 09:00); Fase R (55°/68°/95°) and Fase S (52°/60°/72°) populated",
+    "select_option on native selects (medicoes-machine-filter, termo-machine-filter) drives pivot re-render correctly"
+  ],
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "critical_code_review_comments": [
+    "server.py is now 1119 lines — still exceeds the recommended 700-line threshold. Split by domain (measurements/thermal/dashboard/auth) at your convenience.",
+    "The pre-existing BBA-0001/Motor seed retains 42 raw timestamps with microsecond drift (from imports made BEFORE the fix). Data still renders correctly because pivots group by minute. If desired, run a one-shot DB migration to collapse each historic batch to a single ISO minute so the raw 'data' field also becomes clean; not required for correctness.",
+    "Vibracao.js pivot uses `localeCompare` on ISO strings for column order — works because ISO format is lexicographically sortable, but consider Date.parse() for clarity. Termografia.js same pattern.",
+    "Both formatDateTime (FE) and _fmt_dt (BE) format keys down to the MINUTE. Any additional grouping granularity (e.g., hour or day) would need to be synchronized in both places — consider a shared constant/helper string TIME_BUCKET_FMT if requirements ever change."
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_iter11_batch_ts_pivot.py",
+    "/app/test_reports/pytest/iter11_results.xml"
+  ],
+  "action_items": [
+    "None blocking. The escada bug-fix is fully verified across backend (single batch_ts + minute-grouped pivot in export xlsx) and frontend (Vibração & Termografia Tabela de Dados both minute-grouped).",
+    "OPTIONAL: run a DB cleanup migration on the legacy BBA-0001/Motor measurements to normalize raw 'data' timestamps to a single ISO value per historic batch (visual result is already correct)."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter11_batch_ts_pivot.py (new — 8 tests)"],
+  "success_rate": {"backend": "100% (8/8 pytest)", "frontend": "100% (3 pivot scenarios: BBA escada eliminated, ESF minute-preservation, QDE 3-column termo)"},
+  "test_credentials": "Admin admin@fssolucoes.com/admin123 ✓",
+  "seed_data_creation": "None permanent. test_iter11 creates temporary TEST_TS_*, TEST_TS2_*, TEST_TH_* machines and their measurements/thermal records; deletes them via DELETE /api/machines/{id} in teardown. Seeded ESF-0001/Motor 01 and QDE-229.01 untouched.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter11 covered the batch_ts/minute-grouping bug-fix. Backend regression pytest at /app/backend/tests/test_iter11_batch_ts_pivot.py (8 tests). Key facts for future testing: (1) Vibracao Tabela de Dados thead has 4 FIXED cols [Equipamento, Ponto, Detecção, Un.] so date cols = headers[4:]. (2) Termografia Tabela de Dados thead has only 2 FIXED cols [Equipamento, Ponto] so date cols = headers[2:]. (3) Native <select> filters — use page.select_option(value=<id>); wait ~1500ms for React pivot re-render. (4) formatDateTime uses timeZone 'America/Sao_Paulo' with format 'DD/MM/YYYY, HH:MM' (note the comma). (5) BBA-0001/Motor currently has 5 minute-columns because seed has 5 distinct historical import batches — collapsing by minute is the source of truth. (6) Cleanup: DELETE /api/machines/{id} cascade-deletes the machine's measurements and thermal records.",
+  "rca_of_the_issue": "Root cause of the escada bug (fixed prior to this iteration): import_measurements/import_thermal previously called now_iso() INSIDE the row loop, so each row got a microsecond-different timestamp. Fix: hoist batch_ts = now_iso() outside the loop AND group pivot columns by minute (both in FE formatDateTime and BE _fmt_dt). Verified retroactively — legacy microsecond-drifted data collapses correctly to 5 minute-columns instead of 42. New imports produce a single timestamp shared by all rows."
+}

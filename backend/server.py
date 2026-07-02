@@ -106,12 +106,11 @@ def _fmt_dt(iso: str) -> str:
     except Exception:
         return iso or ""
 
-def _pivot_xlsx(rows, title, value_label="Valor"):
-    """rows: list de dicts {machine_tag, ponto, deteccao, unidade, ordem, values:{iso:val}}"""
+def _pivot_xlsx(rows, cols, title):
+    """rows: list de dicts {machine_tag, ponto, deteccao, unidade, ordem, values:{colKey:val}}; cols: lista ordenada de rótulos."""
     import openpyxl as _op
-    cols = sorted({c for r in rows for c in r["values"].keys()})
     wb = _op.Workbook(); ws = wb.active; ws.title = title[:30]
-    header = ["Equipamento", "Ponto", "Detecção", "Unidade"] + [_fmt_dt(c) for c in cols]
+    header = ["Equipamento", "Ponto", "Detecção", "Unidade"] + list(cols)
     ws.append(header)
     for c in range(1, len(header) + 1):
         ws.cell(row=1, column=c).font = _op.styles.Font(bold=True)
@@ -683,6 +682,7 @@ async def import_measurements(machine_id: Optional[str] = Query(None), file: Upl
     inserted = 0
     skipped = 0
     seq = 0
+    batch_ts = now_iso()
     header_idx: Dict[str, int] = {}
     headers_found = False
 
@@ -764,7 +764,7 @@ async def import_measurements(machine_id: Optional[str] = Query(None), file: Upl
                 "unidade": unidade,
                 "deteccao": deteccao,
                 "ordem": seq,
-                "data": now_iso(),
+                "data": batch_ts,
             }
             await db.measurements.insert_one(doc)
             inserted += 1
@@ -810,12 +810,18 @@ async def export_measurements(machine_id: Optional[str] = Query(None), user=Depe
         qry["machine_id"] = machine_id
     meas = await db.measurements.find(qry, {"_id": 0}).to_list(20000)
     rowMap: Dict[str, Any] = {}
+    colMeta: Dict[str, str] = {}
     for m in meas:
+        colKey = _fmt_dt(m.get("data", ""))
+        raw = m.get("data", "")
+        if colKey not in colMeta or raw < colMeta[colKey]:
+            colMeta[colKey] = raw
         key = f"{m['machine_id']}||{m.get('ponto','')}||{m.get('deteccao','')}"
         if key not in rowMap:
             rowMap[key] = {"machine_tag": m.get("machine_tag", ""), "ponto": m.get("ponto", ""), "deteccao": m.get("deteccao", ""), "unidade": m.get("unidade", ""), "ordem": m.get("ordem", 0), "values": {}}
-        rowMap[key]["values"][m.get("data", "")] = m.get("valor")
-    buf = _pivot_xlsx(list(rowMap.values()), "Vibracao")
+        rowMap[key]["values"][colKey] = m.get("valor")
+    cols = sorted(colMeta.keys(), key=lambda c: colMeta[c])
+    buf = _pivot_xlsx(list(rowMap.values()), cols, "Vibracao")
     return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                              headers={"Content-Disposition": "attachment; filename=tabela_dados_vibracao.xlsx"})
 
@@ -858,6 +864,7 @@ async def import_thermal(file: UploadFile = File(...), user=Depends(require_edit
     wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
     ws = wb[wb.sheetnames[0]]
     inserted = 0; skipped = 0; seq = 0
+    batch_ts = now_iso()
     header_idx: Dict[str, int] = {}; headers_found = False
 
     def col(row, key, default=None):
@@ -894,7 +901,7 @@ async def import_thermal(file: UploadFile = File(...), user=Depends(require_edit
                 await db.machines.insert_one(machine)
 
             doc = {"id": str(uuid.uuid4()), "machine_id": machine["id"], "machine_tag": machine.get("tag", equip),
-                   "ponto": ponto, "temperatura": temperatura, "temp_ambiente": temp_ambiente, "ordem": seq, "data": now_iso()}
+                   "ponto": ponto, "temperatura": temperatura, "temp_ambiente": temp_ambiente, "ordem": seq, "data": batch_ts}
             await db.thermal.insert_one(doc)
             inserted += 1; seq += 1
         except Exception as ex:
@@ -928,12 +935,18 @@ async def export_thermal(machine_id: Optional[str] = Query(None), user=Depends(g
         qry["machine_id"] = machine_id
     items = await db.thermal.find(qry, {"_id": 0}).to_list(20000)
     rowMap: Dict[str, Any] = {}
+    colMeta: Dict[str, str] = {}
     for m in items:
+        colKey = _fmt_dt(m.get("data", ""))
+        raw = m.get("data", "")
+        if colKey not in colMeta or raw < colMeta[colKey]:
+            colMeta[colKey] = raw
         key = f"{m['machine_id']}||{m.get('ponto','')}"
         if key not in rowMap:
             rowMap[key] = {"machine_tag": m.get("machine_tag", ""), "ponto": m.get("ponto", ""), "deteccao": "Temperatura", "unidade": "°C", "ordem": m.get("ordem", 0), "values": {}}
-        rowMap[key]["values"][m.get("data", "")] = m.get("temperatura")
-    buf = _pivot_xlsx(list(rowMap.values()), "Termografia")
+        rowMap[key]["values"][colKey] = m.get("temperatura")
+    cols = sorted(colMeta.keys(), key=lambda c: colMeta[c])
+    buf = _pivot_xlsx(list(rowMap.values()), cols, "Termografia")
     return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                              headers={"Content-Disposition": "attachment; filename=tabela_dados_termografia.xlsx"})
 

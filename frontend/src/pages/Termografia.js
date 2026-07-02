@@ -118,14 +118,15 @@ export default function Termografia() {
   const pivot = useMemo(() => {
     const src = thermal.filter((t) => machineFilter === "todas" || t.machine_id === machineFilter)
       .filter((t) => !q || [t.machine_tag, t.ponto].some((v) => (v || "").toLowerCase().includes(q.toLowerCase())));
-    const colSet = new Set(); const rowMap = {};
+    const colMeta = {}; const rowMap = {};
     for (const t of src) {
-      const col = t.data || ""; colSet.add(col);
+      const colKey = formatDateTime(t.data);
+      if (!(colKey in colMeta) || (t.data || "") < colMeta[colKey]) colMeta[colKey] = t.data || "";
       const key = `${t.machine_id}||${t.ponto}`;
       if (!rowMap[key]) rowMap[key] = { machine_tag: t.machine_tag, ponto: t.ponto, ordem: t.ordem || 0, values: {} };
-      rowMap[key].values[col] = t.temperatura;
+      rowMap[key].values[colKey] = t.temperatura;
     }
-    const cols = Array.from(colSet).sort((a, b) => (a || "").localeCompare(b || ""));
+    const cols = Object.keys(colMeta).sort((a, b) => (colMeta[a] || "").localeCompare(colMeta[b] || ""));
     const rows = Object.values(rowMap).sort((a, b) => (a.machine_tag || "").localeCompare(b.machine_tag || "") || (a.ordem - b.ordem));
     return { cols, rows };
   }, [thermal, machineFilter, q]);
@@ -287,7 +288,7 @@ export default function Termografia() {
             <thead>
               <tr>
                 <th className="sticky left-0 bg-slate-100 z-10">Equipamento</th><th>Ponto</th>
-                {pivot.cols.map((c) => <th key={c} className="whitespace-nowrap text-center">{formatDateTime(c)}</th>)}
+                {pivot.cols.map((c) => <th key={c} className="whitespace-nowrap text-center">{c}</th>)}
               </tr>
             </thead>
             <tbody>
