@@ -1,0 +1,68 @@
+{
+  "summary": "Iter9 validated (1) same-day non-collapse in Vibração 'Tabela de Dados' + Medições 'Tendência' modal and (2) new Cards/Lista view toggle on Máquinas (Vibração) and Termografia, with search working in both views. Backend regression: /api/measurements for ESF-0001/Motor 01 returns exactly 10 rows (1HA=3, 1HV=4, 2HV=3), all with the 'ordem' field. The 4 1HV rows include 2 same-day readings on 2026-06-15 (12:00 UTC = 09:00 BRT valor 9.2 and 18:30 UTC = 15:30 BRT valor 10.5). Frontend: Tabela de Dados renders 4 distinct date+time columns (15/04/2026 09:00, 15/05/2026 09:00, 15/06/2026 09:00, 15/06/2026 15:30) for ESF-0001/Motor 01 with 1HV values [3.1, 5.8, 9.2, 10.5] — same-day NOT collapsed. Medições tab: 1HV valor atual = 10.5 mm/s with A2 alarm; trend-modal renders 4 dots + 4 X-axis date/time labels including both 15/06 readings. Máquinas → Lista: correct 8 headers (TAG, Equipamento, Local, RPM, Pontos, Pico, Status, Diagnósticos); ESF-0001/Motor 01 row shows Pico '10.5 mm/s @ 1HV'; clicking row opens machine-modal; view-cards-btn/view-lista-btn toggle correctly and search filter works in both views. Termografia → Lista: 200 rows with correct headers (TAG, Equipamento, Local, Componente, Status, Últ. diag.); search 'QDE-229' filters to 26 rows in both lista and cards views; toggle works.",
+  "tested_scope": ["backend", "frontend"],
+  "passed_backend": [
+    "GET /api/measurements for ESF-0001/Motor 01 returns 10 items (1HA=3, 1HV=4, 2HV=3)",
+    "All 10 items carry the 'ordem' field",
+    "1HV has 2 same-day readings on 2026-06-15 (12:00 UTC valor=9.2 alarme=A2 + 18:30 UTC valor=10.5 alarme=A2)",
+    "1HV latest reading (10.5) has alarme=A2 as expected for the 'valor atual' medição",
+    "1HA (3.1/5.8/9.2 for 1HV, 0.4/0.6/0.85 for 1HA, 1.2/1.5/2.0 for 2HV) all match seed spec"
+  ],
+  "passed_frontend": [
+    "/vibracao tab-tabela + filter ESF-0001/Motor 01: 4 distinct date+time columns (15/04/2026 09:00, 15/05/2026 09:00, 15/06/2026 09:00, 15/06/2026 15:30) — same-day NOT collapsed",
+    "1HV row values [3.1, 5.8, 9.2, 10.5] appear in the 4 columns in order",
+    "/vibracao tab-medicoes: 1HV row of ESF-0001/Motor 01 shows valor 10.5 mm/s + A2 alarm + data 15/06/2026",
+    "trend-btn on 1HV opens trend-modal with 4 recharts dots and 4 X-axis labels (visually verified: 15/04/2026 09:00, 15/05/2026 09:00, 15/06/2026 09:00, 15/06/2026 15:30)",
+    "/vibracao tab-maquinas: view-cards-btn (default) and view-lista-btn present",
+    "view-lista-btn shows maquinas-lista table with headers [TAG, Equipamento, Local, RPM, Pontos, Pico, Status, Diagnósticos]",
+    "maquina-lista-row-'ESF-0001 / Motor 01': Pico='10.5 mm/s @ 1HV', clicking row opens machine-modal",
+    "view-cards-btn returns to cards view (lista removed from DOM)",
+    "Search input filters rows in both maquinas-lista and card views",
+    "Vibração card ESF-0001/Motor 01 now displays 'Pico: 10.5 mm/s @ 1HV' (updated from 9.2)",
+    "/termografia: termo-view-cards default + termo-view-lista present",
+    "termo-view-lista shows termo-lista table with headers [TAG, Equipamento, Local, Componente, Status, Últ. diag.] and 200 rows",
+    "Search 'QDE-229' in lista filters to 26 rows (all with QDE-229 in TAG)",
+    "termo-view-cards returns to cards; search still filters to 26 cards"
+  ],
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/measurements", "issue": "Legacy measurements imported before iter8 (e.g. BBA-0001 rows visible in the unfiltered Tabela de Dados) still lack the 'ordem' field in DB and get default sort behavior. Not blocking (frontend tolerates via `m.ordem || 0`) but recommended to backfill: db.measurements.update_many({ordem:{$exists:false}}, {$set:{ordem:0}}). Same as iter8."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/vibracao tab-tabela (unfiltered)", "issues": ["When 'Todas as máquinas' is selected, columns from mixed dates (15/04/2026 09:00 vs 02/07/2026 08:46) show many empty cells — expected pivot semantics, but the header row becomes very wide with 9+ columns of near-identical timestamps (02/07/2026 08:46 appears 5× because different machines were imported within the same minute). Consider deduplicating column headers by full timestamp equality only when the values truly differ, OR bucketing to the minute. Cosmetic only."]},
+      {"screen": "/vibracao maquinas-lista Status column", "issues": ["ESF-0001/Motor 01 shows Status='A1' but the 1HV latest measurement is alarme=A2 (10.5 mm/s). Status is driven by the latest diagnostic (A1) not the latest measurement alarm — this matches iter7 design ('status = last diag'), but it's counter-intuitive when the peak Pico cell shows an A2-worthy value. Consider surfacing 'measurement alarm' as a distinct badge or elevating the max(diag, measurement) alarm — behaviour identical in Cards view so no regression, just UX concern."]},
+      {"screen": "React DevTools hydration warning", "issues": ["Persistent 'span cannot be a child of option' warning in console — visual-editor tooling injects <span> inside <option>. Dev-only, no functional impact."]}
+    ]
+  },
+  "critical_code_review_comments": [
+    "Vibracao.js pivot col dedup uses `m.data` (full ISO timestamp) — correct for iter9 requirement. If two imports land at exactly the same ISO second they still collapse; not a concern for current seed but worth noting for the XLSX importer to preserve millisecond precision or append an ordinal suffix on ties.",
+    "Vibracao.js pointHistory sorts by (a.data||'').localeCompare(b.data||'') — ISO strings sort lexically = chronologically for UTC values. OK.",
+    "Vibracao.js line 341 `formatDateTime(c)` and Medições table line 313 still uses `formatDate(m.data)` (date only). Inconsistent granularity — same-day readings look identical in Medições but the trend modal shows time. Not a bug (Medições shows only the latest per point), but for symmetry consider `formatDateTime` in the 'Atualizado' column too.",
+    "Termografia.js line 15 useState('cards') is fine; termo-lista renders 200 rows without virtualization — acceptable at current scale but if the fleet grows to 5k+ termo points a react-virtual/tanstack-virtual pass would help. No action needed now.",
+    "Peak calc in Vibracao.js still unit-blind (compares mm/s vs g by raw valor) — iter7/iter8 comment carried forward. For ESF-0001/Motor 01 the unambiguous mm/s peak is 10.5 > 2.0 > 0.85g, so display is correct."
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_iter9_same_day_measurements.py",
+    "/app/test_reports/pytest/iter9_results.xml"
+  ],
+  "action_items": [
+    "OPTIONAL (from iter8 carry-over): Backfill missing 'ordem' on legacy measurement docs.",
+    "OPTIONAL cosmetic: Consider bucketing/deduplicating pivot column headers on 'Todas as máquinas' view since same-minute imports produce visually duplicated timestamp columns.",
+    "OPTIONAL UX: Reconcile Status badge (last diag) vs Pico measurement alarm on maquinas-lista/cards — currently ESF-0001/Motor 01 shows A1 status while Pico A2 measurement (10.5) is present. Not a regression."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter9_same_day_measurements.py (new)"
+  ],
+  "success_rate": {"backend": "100% (5/5 pytest)", "frontend": "100% (6/6 iter9 flows: Tabela dedup, Medições valor+alarme, trend modal, maquinas lista+toggle+search, termografia lista+toggle+search, machine-modal open from lista)"},
+  "test_credentials": "Admin admin@fssolucoes.com/admin123 ✓",
+  "seed_data_creation": "None — read-only validation against existing seed (ESF-0001/Motor 01 with 4×1HV, 3×1HA, 3×2HV).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "iter9 validated same-day non-collapse (Vibracao.js pivot uses m.data ISO instead of formatDate). formatDateTime renders America/Sao_Paulo local time so 12:00Z→09:00 and 18:30Z→15:30 as expected. Cards/Lista toggles: view-cards-btn/view-lista-btn on /vibracao Máquinas tab, termo-view-cards/termo-view-lista on /termografia. Lista row testids: maquina-lista-row-{tag} (contains slashes/spaces — use document.querySelector with double quotes in evaluate). Regression: /app/backend/tests/test_iter9_same_day_measurements.py. Note: after clearing search input, add a small wait (400ms) before clicking view toggle buttons — otherwise the first click can be intercepted by React re-render (observed once in this iteration, then reliable).",
+  "rca_of_the_issue": "N/A — no bugs found. The transient click-race on view-cards-btn was resolved by adding 400ms wait between search fill('') and next click. Root cause: React state batching between input onChange and button onClick when both target the same parent component."
+}

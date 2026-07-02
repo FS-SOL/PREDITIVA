@@ -3,7 +3,7 @@ import api from "../lib/api";
 import { useAuth } from "../contexts/AuthContext";
 import { formatDate } from "../lib/dates";
 import StatusBadge from "../components/StatusBadge";
-import { Search, Flame, Upload } from "lucide-react";
+import { Search, Flame, Upload, LayoutGrid, List } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Termografia() {
@@ -12,6 +12,7 @@ export default function Termografia() {
   const [machines, setMachines] = useState([]);
   const [diagnostics, setDiagnostics] = useState([]);
   const [q, setQ] = useState("");
+  const [view, setView] = useState("cards");
   const fileRef = useRef(null);
 
   const load = async () => {
@@ -60,11 +61,45 @@ export default function Termografia() {
         </div>
       </div>
 
-      <div className="relative">
-        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar TAG/quadro..." className="w-full max-w-md h-10 pl-9 pr-3 border border-slate-300 rounded-md text-sm bg-white" />
+      <div className="flex flex-wrap gap-2 items-center">
+        <div className="relative flex-1 min-w-[220px] max-w-md">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar TAG/quadro..." className="w-full h-10 pl-9 pr-3 border border-slate-300 rounded-md text-sm bg-white" />
+        </div>
+        <div className="flex gap-1 ml-auto">
+          <button data-testid="termo-view-cards" onClick={() => setView("cards")} className={`h-10 px-3 text-sm rounded-md border flex items-center gap-2 ${view === "cards" ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-300 text-slate-600"}`}><LayoutGrid size={14} /> Cards</button>
+          <button data-testid="termo-view-lista" onClick={() => setView("lista")} className={`h-10 px-3 text-sm rounded-md border flex items-center gap-2 ${view === "lista" ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-300 text-slate-600"}`}><List size={14} /> Lista</button>
+        </div>
       </div>
 
+      {view === "lista" && (
+        <div className="bg-white border border-slate-200 rounded-lg overflow-auto" data-testid="termo-lista">
+          <table className="fs-table w-full">
+            <thead><tr><th>TAG</th><th>Equipamento</th><th>Local</th><th>Componente</th><th>Status</th><th>Últ. diag.</th></tr></thead>
+            <tbody>
+              {filtered.map((m) => {
+                const mDiags = diagnostics.filter((d) => d.machine_id === m.id);
+                const isDiag = mDiags.length > 0;
+                const last = isDiag ? mDiags.sort((a, b) => (b.data || "").localeCompare(a.data || ""))[0] : null;
+                const displayStatus = isDiag ? m.status : "Sem diag.";
+                return (
+                  <tr key={m.id} data-testid={`termo-lista-row-${m.tag}`}>
+                    <td className="font-mono font-semibold text-xs">{m.tag}</td>
+                    <td className="text-xs">{m.equipamento}</td>
+                    <td className="text-xs">{m.local}</td>
+                    <td className="text-xs">{m.componente || "—"}</td>
+                    <td><StatusBadge status={displayStatus} /></td>
+                    <td className="text-xs font-mono">{last ? formatDate(last.data) : "—"}</td>
+                  </tr>
+                );
+              })}
+              {filtered.length === 0 && <tr><td colSpan={6} className="text-center text-slate-500 py-8">Nenhum ponto cadastrado.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {view === "cards" && (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
         {filtered.map((m) => {
           const mDiags = diagnostics.filter((d) => d.machine_id === m.id);
@@ -91,6 +126,7 @@ export default function Termografia() {
         })}
         {filtered.length === 0 && <div className="col-span-full text-slate-500 text-sm p-6 text-center">Nenhum ponto cadastrado. Use "Importar Lista".</div>}
       </div>
+      )}
     </div>
   );
 }

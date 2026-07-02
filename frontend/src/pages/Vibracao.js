@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import api from "../lib/api";
 import { useAuth } from "../contexts/AuthContext";
-import { formatDate } from "../lib/dates";
+import { formatDate, formatDateTime } from "../lib/dates";
 import StatusBadge from "../components/StatusBadge";
-import { Upload, Search, TrendingUp, Download, Gauge, LayoutGrid, Trash2, Table2 } from "lucide-react";
+import { Upload, Search, TrendingUp, Download, Gauge, LayoutGrid, Trash2, Table2, List } from "lucide-react";
 import { toast } from "sonner";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 
@@ -31,6 +31,7 @@ export default function Vibracao() {
   const [diagnostics, setDiagnostics] = useState([]);
   const [q, setQ] = useState("");
   const [tab, setTab] = useState("maquinas");
+  const [maquinasView, setMaquinasView] = useState("cards");
   const [machineFilter, setMachineFilter] = useState("todas");
   const [selected, setSelected] = useState(null);
   const [trendPoint, setTrendPoint] = useState(null);
@@ -92,23 +93,23 @@ export default function Vibracao() {
       .filter((m) => !q || [m.machine_tag, m.subconjunto, m.ponto, m.deteccao].some((v) => (v || "").toLowerCase().includes(q.toLowerCase())));
   }, [latestByPoint, machineFilter, q]);
 
-  // Pivot: linhas = equipamento/ponto, colunas = datas
+  // Pivot: linhas = equipamento/ponto, colunas = cada importação (data+hora)
   const pivot = useMemo(() => {
     const src = measurements
       .filter((m) => machineFilter === "todas" || m.machine_id === machineFilter)
       .filter((m) => !q || [m.machine_tag, m.ponto, m.deteccao].some((v) => (v || "").toLowerCase().includes(q.toLowerCase())));
-    const dateSet = new Set();
+    const colSet = new Set();
     const rowMap = {};
     for (const m of src) {
-      const dt = formatDate(m.data);
-      dateSet.add(dt);
+      const col = m.data || "";
+      colSet.add(col);
       const key = `${m.machine_id}||${m.ponto}||${m.deteccao}`;
       if (!rowMap[key]) rowMap[key] = { machine_tag: m.machine_tag, ponto: m.ponto, deteccao: m.deteccao, unidade: m.unidade, ordem: m.ordem || 0, values: {} };
-      rowMap[key].values[dt] = m.valor;
+      rowMap[key].values[col] = m.valor;
     }
-    const dates = Array.from(dateSet).sort((a, b) => a.split("/").reverse().join("").localeCompare(b.split("/").reverse().join("")));
+    const cols = Array.from(colSet).sort((a, b) => (a || "").localeCompare(b || ""));
     const rows = Object.values(rowMap).sort((a, b) => (a.machine_tag || "").localeCompare(b.machine_tag || "") || (a.ordem - b.ordem));
-    return { dates, rows };
+    return { cols, rows };
   }, [measurements, machineFilter, q]);
 
   const pointHistory = useMemo(() => {
@@ -116,7 +117,7 @@ export default function Vibracao() {
     return measurements
       .filter((m) => m.machine_id === trendPoint.machine_id && m.ponto === trendPoint.ponto && m.deteccao === trendPoint.deteccao)
       .sort((a, b) => (a.data || "").localeCompare(b.data || ""))
-      .map((m) => ({ data: formatDate(m.data), valor: m.valor }));
+      .map((m) => ({ data: formatDateTime(m.data), valor: m.valor }));
   }, [trendPoint, measurements]);
 
   const selectedPoints = useMemo(() => {
@@ -202,9 +203,15 @@ export default function Vibracao() {
             {measuredMachines.map((mm) => <option key={mm.id} value={mm.id}>{mm.tag}</option>)}
           </select>
         )}
+        {tab === "maquinas" && (
+          <div className="flex gap-1 ml-auto">
+            <button data-testid="view-cards-btn" onClick={() => setMaquinasView("cards")} className={`h-10 px-3 text-sm rounded-md border flex items-center gap-2 ${maquinasView === "cards" ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-300 text-slate-600"}`}><LayoutGrid size={14} /> Cards</button>
+            <button data-testid="view-lista-btn" onClick={() => setMaquinasView("lista")} className={`h-10 px-3 text-sm rounded-md border flex items-center gap-2 ${maquinasView === "lista" ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-300 text-slate-600"}`}><List size={14} /> Lista</button>
+          </div>
+        )}
       </div>
 
-      {tab === "maquinas" && (
+      {tab === "maquinas" && maquinasView === "cards" && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
           {filtered.map((m) => {
             const points = latestByPoint.filter((x) => x.machine_id === m.id).length;
@@ -244,6 +251,42 @@ export default function Vibracao() {
               </button>
             );
           })}
+        </div>
+      )}
+
+      {tab === "maquinas" && maquinasView === "lista" && (
+        <div className="bg-white border border-slate-200 rounded-lg overflow-auto" data-testid="maquinas-lista">
+          <table className="fs-table w-full">
+            <thead>
+              <tr><th>TAG</th><th>Equipamento</th><th>Local</th><th>RPM</th><th>Pontos</th><th>Pico</th><th>Status</th><th>Diagnósticos</th></tr>
+            </thead>
+            <tbody>
+              {filtered.map((m) => {
+                const points = latestByPoint.filter((x) => x.machine_id === m.id).length;
+                const peak = peakByMachine[m.id];
+                const hist = diagsByMachine[m.id] || [];
+                const displayStatus = hist.length > 0 ? m.status : "Sem diag.";
+                return (
+                  <tr key={m.id} data-testid={`maquina-lista-row-${m.tag}`} className="cursor-pointer hover:bg-slate-50" onClick={() => setSelected(m)}>
+                    <td className="font-mono font-semibold text-xs">{m.tag}</td>
+                    <td className="text-xs">{m.equipamento}</td>
+                    <td className="text-xs">{m.local}</td>
+                    <td className="font-mono text-xs">{m.rpm || "-"}</td>
+                    <td className="font-mono text-xs">{points}</td>
+                    <td className="font-mono text-xs text-amber-700">{peak ? `${peak.valor} ${peak.unidade} @ ${peak.ponto}` : "—"}</td>
+                    <td><StatusBadge status={displayStatus} /></td>
+                    <td>
+                      <div className="flex items-center gap-1">
+                        {hist.map((d) => <span key={d.id} title={`${(d.data || "").slice(0, 10)} — ${d.status}`} className="w-2.5 h-2.5 rounded-full" style={{ background: STATUS_COLOR[d.status] || "#94A3B8" }} />)}
+                        {hist.length === 0 && <span className="text-[11px] text-slate-400 italic">—</span>}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {filtered.length === 0 && <tr><td colSpan={8} className="text-center text-slate-500 py-8">Nenhuma máquina</td></tr>}
+            </tbody>
+          </table>
         </div>
       )}
 
@@ -295,7 +338,7 @@ export default function Vibracao() {
               <tr>
                 <th className="sticky left-0 bg-slate-100 z-10">Equipamento</th>
                 <th>Ponto</th><th>Detecção</th><th>Un.</th>
-                {pivot.dates.map((d) => <th key={d} className="whitespace-nowrap text-center">{d}</th>)}
+                {pivot.cols.map((c) => <th key={c} className="whitespace-nowrap text-center">{formatDateTime(c)}</th>)}
               </tr>
             </thead>
             <tbody>
@@ -305,11 +348,11 @@ export default function Vibracao() {
                   <td>{r.ponto || "—"}</td>
                   <td className="text-xs">{r.deteccao || "—"}</td>
                   <td className="text-xs">{r.unidade || "—"}</td>
-                  {pivot.dates.map((d) => {
-                    const v = r.values[d];
+                  {pivot.cols.map((c) => {
+                    const v = r.values[c];
                     const al = v !== undefined ? isoAlarm(v, r.unidade, r.deteccao) : null;
                     return (
-                      <td key={d} className="text-center font-mono" style={al ? { background: ALARM_COLOR[al] } : undefined}>
+                      <td key={c} className="text-center font-mono" style={al ? { background: ALARM_COLOR[al] } : undefined}>
                         {v !== undefined ? v : "—"}
                       </td>
                     );
@@ -317,7 +360,7 @@ export default function Vibracao() {
                 </tr>
               ))}
               {pivot.rows.length === 0 && (
-                <tr><td colSpan={4 + pivot.dates.length} className="text-center text-slate-500 py-8">Sem dados. Importe medições para montar o histórico por datas.</td></tr>
+                <tr><td colSpan={4 + pivot.cols.length} className="text-center text-slate-500 py-8">Sem dados. Importe medições para montar o histórico por datas.</td></tr>
               )}
             </tbody>
           </table>
