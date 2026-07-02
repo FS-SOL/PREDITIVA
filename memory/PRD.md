@@ -63,6 +63,9 @@ Criar software de manutenção preditiva. Login (e-mail/senha + Google) com side
 - **Dashboard — Alertas do Último Upload**: bloco com pontos em A2/Parado no valor mais recente (`latest_alerts`).
 - Descritivo completo em /app/FUNCIONALIDADES.md. Validado iteration_10: backend 7/7, frontend 100%.
 
+## Fix (Jul 2026)
+- Corrigido efeito "escada" na Tabela de Dados: importação agora usa UM timestamp por lote (batch_ts) e a matriz (Vibração e Termografia) agrupa colunas por MINUTO — medições da mesma coleta ficam na mesma coluna, independente do ponto. Coletas de horários diferentes permanecem separadas. Exports Excel também agrupados por minuto. Validado iteration_11: backend 8/8, frontend 100%.
+
 ## Backlog (P1/P2)
 - P1: Login com Google (Emergent Auth)
 - P1: Exportar diagnósticos em PDF/Excel
