@@ -151,6 +151,19 @@ export default function Vibracao() {
     } catch (err) { toast.error("Falha ao gerar template"); }
   };
 
+  const exportTabela = async () => {
+    toast.message("Gerando Excel...");
+    try {
+      const params = machineFilter !== "todas" ? { machine_id: machineFilter } : {};
+      const res = await api.get("/measurements/export", { responseType: "blob", params });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement("a");
+      a.href = url; a.download = "tabela_dados_vibracao.xlsx";
+      document.body.appendChild(a); a.click(); a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) { toast.error("Falha ao exportar"); }
+  };
+
   const deletePoint = async (m) => {
     if (!window.confirm(`Excluir todas as medições do ponto ${m.ponto} (${m.deteccao}) de ${m.machine_tag}?`)) return;
     try {
@@ -202,6 +215,11 @@ export default function Vibracao() {
             <option value="todas">Todas as máquinas ({measuredMachines.length})</option>
             {measuredMachines.map((mm) => <option key={mm.id} value={mm.id}>{mm.tag}</option>)}
           </select>
+        )}
+        {tab === "tabela" && (
+          <button data-testid="export-tabela-btn" onClick={exportTabela} className="h-10 px-3 text-sm bg-emerald-600 text-white rounded-md flex items-center gap-2 hover:bg-emerald-700">
+            <Download size={14} /> Exportar Excel
+          </button>
         )}
         {tab === "maquinas" && (
           <div className="flex gap-1 ml-auto">

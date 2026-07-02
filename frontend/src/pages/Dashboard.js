@@ -4,7 +4,8 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line, Legend,
 } from "recharts";
 import StatusBadge from "../components/StatusBadge";
-import { Activity, Heart, AlertTriangle, Cog } from "lucide-react";
+import { formatDateTime } from "../lib/dates";
+import { Activity, Heart, AlertTriangle, Cog, BellRing } from "lucide-react";
 
 const COLORS = { OK: "#22C55E", A1: "#FACC15", A2: "#F97316", Parado: "#EF4444", "Sem diag.": "#94A3B8" };
 
@@ -46,6 +47,32 @@ export default function Dashboard() {
         <Kpi icon={Activity} label="Diagnósticos" value={d.total_diagnostics} sub="emitidos" />
         <Kpi icon={AlertTriangle} label="Em Alerta" value={(d.status_dist.A1 || 0) + (d.status_dist.A2 || 0) + (d.status_dist.Parado || 0)} color="text-orange-600" sub="A1 + A2 + Parado" />
       </div>
+
+      {d.latest_alerts && d.latest_alerts.length > 0 && (
+        <div className="kpi-card border-l-4 border-l-red-500" data-testid="latest-alerts">
+          <h3 className="font-display font-semibold text-slate-900 mb-3 flex items-center gap-2">
+            <BellRing size={18} className="text-red-500" /> Alertas do Último Upload
+            <span className="text-xs font-normal text-slate-500">({d.latest_alerts.length} ponto(s) em A2/Parado)</span>
+          </h3>
+          <div className="overflow-auto max-h-[280px]">
+            <table className="fs-table w-full">
+              <thead><tr><th>Tipo</th><th>Equipamento</th><th>Ponto</th><th>Valor</th><th>Alarme</th><th>Coleta</th></tr></thead>
+              <tbody>
+                {d.latest_alerts.map((a, i) => (
+                  <tr key={i} data-testid={`alert-row-${i}`}>
+                    <td className="text-xs">{a.tipo}</td>
+                    <td className="font-mono text-xs">{a.machine_tag}</td>
+                    <td>{a.ponto || "—"}</td>
+                    <td className="font-mono font-semibold">{a.valor} {a.unidade}</td>
+                    <td><StatusBadge status={a.alarme} /></td>
+                    <td className="text-xs whitespace-nowrap">{formatDateTime(a.data)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="kpi-card lg:col-span-1">

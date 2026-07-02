@@ -1,0 +1,66 @@
+{
+  "summary": "Iter10 validated the 3 new features requested: (A) Termografia TEMPERATURA module (template + import + list with alarme/ΔT + delete + point/clear + trend modal + Máx °C on cards/lista), (B) Excel export for Vibração & Termografia data tables, (C) Dashboard 'Alertas do Último Upload' block. All 7 backend pytest tests pass. All FE flows verified via Playwright against public REACT_APP_BACKEND_URL. QDE-229.01 shows Máx: 95°C @ Fase R on card; Temperaturas tab shows Fase R 95°C ΔT67 A2 + Fase S 72°C ΔT44 A1 with 3-point trend modal (55/68/95); Tabela de Dados renders 3 date columns (10/04, 10/05, 10/06 2026) with all 6 values (55/68/95 for Fase R, 52/60/72 for Fase S). Dashboard latest_alerts shows exactly the 2 expected rows (ESF-0001/Motor 01 1HV 10.5 mm/s A2 + QDE-229.01 Fase R 95 °C A2). Both Excel exports produce .xlsx downloads (tabela_dados_termografia.xlsx and tabela_dados_vibracao.xlsx).",
+  "tested_scope": ["backend", "frontend"],
+  "passed_backend": [
+    "GET /api/thermal/template → 200 xlsx with headers [Equipamento, Ponto, Temperatura, Temp_Ambiente] and pre-filled thermografia machines",
+    "GET /api/thermal returns items with alarme + delta_t; QDE-229.01 Fase R 95 → alarme=A2, delta_t=67.0; Fase S 72 → alarme=A1",
+    "POST /api/thermal/import classifies 45→OK, 75→A1, 105→A2 and links by tag; delta_t computed",
+    "DELETE /api/thermal/{id} → 200 for admin",
+    "DELETE /api/thermal/point/clear → 200 for admin, cleans by (machine_id, ponto)",
+    "Viewer role receives 403 on both DELETE endpoints (via /auth/register + require_editor)",
+    "GET /api/measurements/export → 200 xlsx with header prefix [Equipamento, Ponto, Detecção, Unidade] + date columns",
+    "GET /api/thermal/export → 200 xlsx pivot containing (QDE-229.01, Fase R) and (QDE-229.01, Fase S)",
+    "GET /api/dashboard includes 'latest_alerts' list; contents restricted to A2/Parado; both expected alerts (Vibração ESF-0001/Motor 01 1HV=10.5 mm/s A2 + Termografia QDE-229.01 Fase R=95 °C A2) present with correct schema (tipo, machine_tag, ponto, valor, unidade, alarme, data)"
+  ],
+  "passed_frontend": [
+    "/dashboard latest-alerts block visible; 2 alert-row items with expected content (Vibração ESF-0001 / Motor 01 1HV 10.5 mm/s A2 15/06/2026 15:30 + Termografia QDE-229.01 Fase R 95 °C A2 10/06/2026 09:00)",
+    "/termografia: 3 tabs present (tab-pontos, tab-temperaturas, tab-tabela-termo)",
+    "/termografia: admin sees thermal-template-btn + import-temp-btn (+ import-termo-btn)",
+    "/termografia Pontos/Cards: card QDE-229.01 shows 'Máx: 95°C @ Fase R' via data-testid=termo-max-QDE-229.01",
+    "/termografia Pontos/Lista: table headers include 'Máx °C' column (rendered uppercased as 'MÁX °C' via CSS text-transform) and QDE-229.01 row shows '95°C'",
+    "/termografia Temperaturas: temperaturas-table with termo-machine-filter; QDE-229.01 filter yields 2 rows — Fase R 95°C ambient 28°C ΔT 67°C alarme A2 + Fase S 72°C ambient 28°C ΔT 44°C alarme A1",
+    "/termografia Temperaturas: temp-trend-* opens temp-trend-modal; Fase R history renders exactly 3 dots (55, 68, 95) + LineChart",
+    "/termografia Temperaturas: del-temp-* button visible for admin (2 count on filtered rows)",
+    "/termografia Tabela de Dados: tabela-dados-termo pivot for QDE-229.01 has 3 date columns (10/04/2026 09:00, 10/05/2026 09:00, 10/06/2026 09:00) and 2 rows (Fase R: 55°/68°/95°, Fase S: 52°/60°/72°)",
+    "/termografia Tabela de Dados: export-tabela-termo-btn downloads tabela_dados_termografia.xlsx",
+    "/vibracao Tabela de Dados: export-tabela-btn downloads tabela_dados_vibracao.xlsx"
+  ],
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/termografia Tabela de Dados", "issues": ["When 'Todas as máquinas' is selected the pivot renders many empty cells (200+ points × N dates). Cosmetic; performance-wise still OK because openpyxl is only invoked on Exportar click."]},
+      {"screen": "Global (visual-editor dev tool)", "issues": ["Persistent React hydration warning: '<span> cannot be a child of <option>' — injected by the emergent visual-editor tooling around dynamic <option> children (e.g. termo-machine-filter). Dev-tooling only, no functional impact."]}
+    ]
+  },
+  "critical_code_review_comments": [
+    "server.py grew to 1105 lines. Recommend splitting routes into modules (auth, machines, defects, diagnostics, measurements, thermal, dashboard, reports) — >700-line file threshold breached. Not urgent, but future maintainability concern.",
+    "server.py _pivot_xlsx sorts rows by (machine_tag, ordem) but 'ordem' comes from the last thermal import batch only, not from the machine's canonical point order. For thermal 6 seeded rows the display order is preserved by chance; for user-imported data the column semantics of 'Detecção'='Temperatura' + 'Unidade'='°C' are fixed constants — acceptable now.",
+    "Dashboard latest_alerts computes 'latest by point' twice (measurements + thermal) with identical logic — could be extracted into a helper `_latest_by_key(items, key_fn)`. Minor DRY.",
+    "temp_alarm in server.py and tempAlarm in Termografia.js duplicate the same 60/90/120 thresholds. Fine for now, but if thresholds ever change both must be updated in sync (no shared constant module). Consider surfacing thresholds via a /api/config endpoint if these ever need to be tunable per plant.",
+    "Termografia.js: `del-temp-{id}` inside a row within a modal-close ancestor is OK, but the modal's inner `data-testid='temp-trend-modal'` is the CONTENT box (with e.stopPropagation) — clicking its bounding box does NOT close the modal (only clicking the overlay does). Test agents should use Escape key or click at page coordinate outside the modal box. Optional: expose an explicit close button (X) to improve UX."
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_iter10_thermal_export_alerts.py",
+    "/app/test_reports/pytest/iter10_results.xml"
+  ],
+  "action_items": [
+    "None blocking. All 3 new features (temperature module, Excel export, dashboard alerts) work end-to-end.",
+    "OPTIONAL UX: Add explicit close-X button to temp-trend-modal (currently only closable by clicking overlay).",
+    "OPTIONAL refactor: Split server.py (1105 lines) into module files (auth/machines/thermal/dashboard etc.)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter10_thermal_export_alerts.py (new — 7 tests)"
+  ],
+  "success_rate": {"backend": "100% (7/7 pytest)", "frontend": "100% (dashboard latest-alerts + termografia 3 tabs + Máx°C card/lista + temperaturas ΔT/alarme + trend modal 3 dots + del-temp admin + tabela-dados-termo pivot + both Excel exports)"},
+  "test_credentials": "Admin admin@fssolucoes.com/admin123 ✓; created ephemeral viewer TEST_viewer_iter10@fs.com/viewer123 for 403 test (idempotent register/login).",
+  "seed_data_creation": "None permanent — test_iter10_thermal_export_alerts.py creates temporary TEST_TEMP_IMPORT_01 and TEST_TEMP_DEL_01 machines + thermal records and cleans them up in-test. QDE-229.01 and ESF-0001/Motor 01 seeds untouched.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "iter10 covered the 3 new features (temperature, Excel export, dashboard latest_alerts). Backend regression pytest at /app/backend/tests/test_iter10_thermal_export_alerts.py — run with `pytest backend/tests/test_iter10_thermal_export_alerts.py`. Key selectors: tab-pontos/tab-temperaturas/tab-tabela-termo, thermal-template-btn/import-temp-btn/import-termo-btn, termo-max-{tag}, termo-machine-filter (native select — use page.select_option(label=...)), temp-row-{id}, temp-trend-{id}, temp-trend-modal (inner box has stopPropagation — close via Escape or click on overlay coordinates outside the content box), del-temp-{id}, tabela-dados-termo, tabela-termo-row-{i}, export-tabela-termo-btn (thermal xlsx), export-tabela-btn (vibração xlsx), latest-alerts, alert-row-{i}. Note: Table headers use CSS text-transform: uppercase — assertions must be case-insensitive (e.g. 'Máx °C' renders as 'MÁX °C' in inner_text).",
+  "rca_of_the_issue": "N/A — no bugs. Two testing gotchas noted: (1) after login the app stays on '/' route (does not navigate to /dashboard) so wait_for_url('**/dashboard**') times out — wait_for_selector([data-testid=dashboard-page]) is the reliable pattern; (2) the temp-trend-modal's inner box has onClick e.stopPropagation() so clicking on the modal's bounding box does NOT close it — must Escape or click on the outer overlay at coordinates well outside the inner box."
+}

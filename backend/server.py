@@ -85,6 +85,42 @@ def iso_alarm(valor: float, unidade: str, deteccao: str) -> str:
         return "A2"
     return "Parado"
 
+def temp_alarm(temp) -> str:
+    """Classificação de temperatura (°C): OK<=60, A1(Atenção)<=90, A2(Crítico)<=120, Parado>120."""
+    try:
+        t = float(temp)
+    except (TypeError, ValueError):
+        return "OK"
+    if t <= 60:
+        return "OK"
+    if t <= 90:
+        return "A1"
+    if t <= 120:
+        return "A2"
+    return "Parado"
+
+def _fmt_dt(iso: str) -> str:
+    try:
+        dt = datetime.fromisoformat((iso or "").replace("Z", "+00:00"))
+        return dt.strftime("%d/%m/%Y %H:%M")
+    except Exception:
+        return iso or ""
+
+def _pivot_xlsx(rows, title, value_label="Valor"):
+    """rows: list de dicts {machine_tag, ponto, deteccao, unidade, ordem, values:{iso:val}}"""
+    import openpyxl as _op
+    cols = sorted({c for r in rows for c in r["values"].keys()})
+    wb = _op.Workbook(); ws = wb.active; ws.title = title[:30]
+    header = ["Equipamento", "Ponto", "Detecção", "Unidade"] + [_fmt_dt(c) for c in cols]
+    ws.append(header)
+    for c in range(1, len(header) + 1):
+        ws.cell(row=1, column=c).font = _op.styles.Font(bold=True)
+    rows_sorted = sorted(rows, key=lambda r: ((r.get("machine_tag") or ""), r.get("ordem", 0)))
+    for r in rows_sorted:
+        ws.append([r.get("machine_tag", ""), r.get("ponto", ""), r.get("deteccao", ""), r.get("unidade", "")] + [r["values"].get(c, "") for c in cols])
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    return buf
+
 def create_token(user_id: str, email: str, ttl_min: int = 60 * 24 * 7) -> str:
     payload = {
         "sub": user_id,
@@ -766,6 +802,141 @@ async def delete_measurement_point(machine_id: str = Query(...), ponto: str = Qu
         await log_deletion(user, "medição (ponto)", f"{sample.get('machine_tag','')} • {ponto} ({deteccao}) — {res.deleted_count} registro(s)", {"machine_id": machine_id, "ponto": ponto, "deteccao": deteccao})
     return {"ok": True, "deleted": res.deleted_count}
 
+@api.get("/measurements/export")
+async def export_measurements(machine_id: Optional[str] = Query(None), user=Depends(get_current_user)):
+    from starlette.responses import StreamingResponse
+    qry: Dict[str, Any] = {}
+    if machine_id:
+        qry["machine_id"] = machine_id
+    meas = await db.measurements.find(qry, {"_id": 0}).to_list(20000)
+    rowMap: Dict[str, Any] = {}
+    for m in meas:
+        key = f"{m['machine_id']}||{m.get('ponto','')}||{m.get('deteccao','')}"
+        if key not in rowMap:
+            rowMap[key] = {"machine_tag": m.get("machine_tag", ""), "ponto": m.get("ponto", ""), "deteccao": m.get("deteccao", ""), "unidade": m.get("unidade", ""), "ordem": m.get("ordem", 0), "values": {}}
+        rowMap[key]["values"][m.get("data", "")] = m.get("valor")
+    buf = _pivot_xlsx(list(rowMap.values()), "Vibracao")
+    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             headers={"Content-Disposition": "attachment; filename=tabela_dados_vibracao.xlsx"})
+
+# ============== Termografia (Temperatura) ==============
+@api.get("/thermal")
+async def list_thermal(machine_id: Optional[str] = None, user=Depends(get_current_user)):
+    qry: Dict[str, Any] = {}
+    if machine_id:
+        qry["machine_id"] = machine_id
+    items = await db.thermal.find(qry, {"_id": 0}).sort([("ordem", 1), ("data", 1)]).to_list(20000)
+    for it in items:
+        it.setdefault("ordem", 0)
+        it["alarme"] = temp_alarm(it.get("temperatura"))
+        try:
+            it["delta_t"] = round(float(it.get("temperatura")) - float(it.get("temp_ambiente")), 1) if it.get("temp_ambiente") not in (None, "") else None
+        except (TypeError, ValueError):
+            it["delta_t"] = None
+    return items
+
+@api.get("/thermal/template")
+async def thermal_template(user=Depends(get_current_user)):
+    from starlette.responses import StreamingResponse
+    machines = await db.machines.find({"tipo": {"$in": ["termografia", "ambos"]}}, {"_id": 0}).sort("tag", 1).to_list(10000)
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Termografia"
+    headers = ["Equipamento", "Ponto", "Temperatura", "Temp_Ambiente"]
+    ws.append(headers)
+    for c in range(1, len(headers) + 1):
+        ws.cell(row=1, column=c).font = openpyxl.styles.Font(bold=True)
+    for m in machines:
+        ws.append([m.get("tag", ""), m.get("componente", "") or "", "", ""])
+    for i, w in enumerate([22, 18, 14, 14], start=1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             headers={"Content-Disposition": "attachment; filename=template_termografia.xlsx"})
+
+@api.post("/thermal/import")
+async def import_thermal(file: UploadFile = File(...), user=Depends(require_editor)):
+    content = await file.read()
+    wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+    ws = wb[wb.sheetnames[0]]
+    inserted = 0; skipped = 0; seq = 0
+    header_idx: Dict[str, int] = {}; headers_found = False
+
+    def col(row, key, default=None):
+        i = header_idx.get(key, -1)
+        return row[i] if 0 <= i < len(row) else default
+
+    for row in ws.iter_rows(values_only=True):
+        if not headers_found:
+            vals = [str(c).strip() if c else "" for c in row]
+            norm = [v.lower() for v in vals]
+            if "equipamento" in norm or "temperatura" in norm:
+                for i, v in enumerate(vals):
+                    header_idx[v.strip().lower()] = i
+                headers_found = True
+            continue
+        try:
+            equip = col(row, "equipamento")
+            if equip in (None, ""):
+                continue
+            equip = str(equip).strip()
+            ponto = str(col(row, "ponto", "") or "").strip()
+            temp_raw = col(row, "temperatura")
+            if temp_raw in (None, ""):
+                continue
+            temperatura = float(temp_raw)
+            amb_raw = col(row, "temp_ambiente")
+            temp_ambiente = float(amb_raw) if amb_raw not in (None, "") else None
+
+            machine = await db.machines.find_one({"tag": {"$regex": f"^{re.escape(equip)}$", "$options": "i"}})
+            if not machine:
+                machine = await db.machines.find_one({"parent_tag": {"$regex": f"^{re.escape(equip)}$", "$options": "i"}})
+            if not machine:
+                machine = {"id": str(uuid.uuid4()), "tag": equip, "parent_tag": equip, "subconjunto": "", "local": "", "equipamento": equip, "descricao": "", "componente": ponto, "tipo": "termografia", "criticidade": "Média", "status": "Sem diag.", "created_at": now_iso()}
+                await db.machines.insert_one(machine)
+
+            doc = {"id": str(uuid.uuid4()), "machine_id": machine["id"], "machine_tag": machine.get("tag", equip),
+                   "ponto": ponto, "temperatura": temperatura, "temp_ambiente": temp_ambiente, "ordem": seq, "data": now_iso()}
+            await db.thermal.insert_one(doc)
+            inserted += 1; seq += 1
+        except Exception as ex:
+            logger.warning("Skip thermal: %s", ex)
+            skipped += 1
+    return {"inserted": inserted, "skipped": skipped}
+
+@api.delete("/thermal/point/clear")
+async def delete_thermal_point(machine_id: str = Query(...), ponto: str = Query(""), user=Depends(require_editor)):
+    sample = await db.thermal.find_one({"machine_id": machine_id, "ponto": ponto}, {"_id": 0})
+    res = await db.thermal.delete_many({"machine_id": machine_id, "ponto": ponto})
+    if res.deleted_count and sample:
+        await log_deletion(user, "temperatura (ponto)", f"{sample.get('machine_tag','')} • {ponto} — {res.deleted_count} registro(s)", {"machine_id": machine_id, "ponto": ponto})
+    return {"ok": True, "deleted": res.deleted_count}
+
+@api.delete("/thermal/{tid}")
+async def delete_thermal(tid: str, user=Depends(require_editor)):
+    t = await db.thermal.find_one({"id": tid}, {"_id": 0})
+    res = await db.thermal.delete_one({"id": tid})
+    if not res.deleted_count:
+        raise HTTPException(404, "Registro não encontrado")
+    if t:
+        await log_deletion(user, "temperatura", f"{t.get('machine_tag','')} • {t.get('ponto','')} = {t.get('temperatura','')}°C", {"id": tid})
+    return {"ok": True}
+
+@api.get("/thermal/export")
+async def export_thermal(machine_id: Optional[str] = Query(None), user=Depends(get_current_user)):
+    from starlette.responses import StreamingResponse
+    qry: Dict[str, Any] = {}
+    if machine_id:
+        qry["machine_id"] = machine_id
+    items = await db.thermal.find(qry, {"_id": 0}).to_list(20000)
+    rowMap: Dict[str, Any] = {}
+    for m in items:
+        key = f"{m['machine_id']}||{m.get('ponto','')}"
+        if key not in rowMap:
+            rowMap[key] = {"machine_tag": m.get("machine_tag", ""), "ponto": m.get("ponto", ""), "deteccao": "Temperatura", "unidade": "°C", "ordem": m.get("ordem", 0), "values": {}}
+        rowMap[key]["values"][m.get("data", "")] = m.get("temperatura")
+    buf = _pivot_xlsx(list(rowMap.values()), "Termografia")
+    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             headers={"Content-Disposition": "attachment; filename=tabela_dados_termografia.xlsx"})
+
 # ============== Dashboard ==============
 @api.get("/dashboard")
 async def dashboard(user=Depends(get_current_user)):
@@ -825,6 +996,34 @@ async def dashboard(user=Depends(get_current_user)):
         ranking.append({"tag": m.get("tag"), "equipamento": m.get("equipamento", ""), "local": m.get("local", ""), "status": m.get("status"), "criticidade": m.get("criticidade"), "score": score})
     ranking = sorted(ranking, key=lambda x: x["score"], reverse=True)[:10]
 
+    # Alertas do último upload (medições/temperaturas em A2 ou Parado — último valor por ponto)
+    alerts = []
+    meas = await db.measurements.find({}, {"_id": 0}).to_list(20000)
+    latest_m: Dict[str, Any] = {}
+    for m in meas:
+        key = f"{m['machine_id']}||{m.get('ponto','')}||{m.get('deteccao','')}"
+        cur = latest_m.get(key)
+        if not cur or (m.get("data", "") > cur.get("data", "")):
+            latest_m[key] = m
+    for m in latest_m.values():
+        al = iso_alarm(m.get("valor"), m.get("unidade", ""), m.get("deteccao", ""))
+        if al in ("A2", "Parado"):
+            alerts.append({"tipo": "Vibração", "machine_tag": m.get("machine_tag", ""), "ponto": m.get("ponto", ""),
+                           "valor": m.get("valor"), "unidade": m.get("unidade", ""), "alarme": al, "data": m.get("data")})
+    thermal = await db.thermal.find({}, {"_id": 0}).to_list(20000)
+    latest_t: Dict[str, Any] = {}
+    for t in thermal:
+        key = f"{t['machine_id']}||{t.get('ponto','')}"
+        cur = latest_t.get(key)
+        if not cur or (t.get("data", "") > cur.get("data", "")):
+            latest_t[key] = t
+    for t in latest_t.values():
+        al = temp_alarm(t.get("temperatura"))
+        if al in ("A2", "Parado"):
+            alerts.append({"tipo": "Termografia", "machine_tag": t.get("machine_tag", ""), "ponto": t.get("ponto", ""),
+                           "valor": t.get("temperatura"), "unidade": "°C", "alarme": al, "data": t.get("data")})
+    alerts = sorted(alerts, key=lambda x: (x["alarme"] != "Parado", x.get("data") or ""), reverse=True)[:15]
+
     return {
         "total_machines": total,
         "status_dist": status_dist,
@@ -832,6 +1031,7 @@ async def dashboard(user=Depends(get_current_user)):
         "top_defects": top_defects,
         "monthly_evolution": monthly,
         "failure_ranking": ranking,
+        "latest_alerts": alerts,
         "total_diagnostics": len(diagnostics),
     }
 

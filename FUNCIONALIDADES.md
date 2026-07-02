@@ -26,6 +26,8 @@ executivos e trilha de auditoria.
 - **Evolução mensal** dos diagnósticos por status (últimos 6 meses).
 - **Principais defeitos** (ranking dos defeitos mais recorrentes).
 - **Ranking de probabilidade de falha** (combinação de status × criticidade).
+- **Alertas do Último Upload**: destaque dos pontos (vibração e temperatura) que estão em
+  nível A2/Crítico ou Parado no valor mais recente, para priorizar inspeções após cada coleta.
 
 ## 3. Plantas (Hierarquia) — *admin*
 - Estrutura em árvore: **Empresa → Unidade → Área → Equipamento → Subconjunto → Ponto**.
@@ -50,15 +52,19 @@ Tela com três abas e opção de visualização em **Cards** ou **Lista** (com b
   botão **Ver tendência** (gráfico do ponto ao longo do tempo) e **excluir** medições.
 - **Aba Tabela de Dados:** matriz **equipamento/ponto × datas de coleta** (cada importação
   vira uma coluna de data/hora, permitindo múltiplas coletas no mesmo dia), com células
-  coloridas pelo nível de alarme.
+  coloridas pelo nível de alarme e **exportação para Excel**.
 - **Template Excel**: botão "Baixar Template" gera planilha pré-preenchida com as máquinas
   de vibração; "Importar Overall" carrega as medições preservando a ordem da planilha.
 
 ## 6. Termografia
 - Lista de pontos de inspeção (quadros elétricos, transformadores, mancais etc.) em
-  **Cards** ou **Lista**, com busca.
-- Cada ponto mostra TAG, equipamento, local, componente, status e último diagnóstico.
+  **Cards** ou **Lista**, com busca. Cada ponto mostra TAG, equipamento, local, componente,
+  **temperatura máxima** (Máx °C @ ponto), status e último diagnóstico.
 - **Importação por Excel** da lista de termografia ("Importar Lista").
+- **Registro de Temperaturas**: aba "Temperaturas" com "Template Temp." e "Importar Temperaturas";
+  cada ponto exibe a **temperatura atual**, temperatura ambiente, **ΔT** e classificação
+  automática (OK ≤ 60°C, Atenção ≤ 90°C, Crítico ≤ 120°C, Parado > 120°C), com tendência e exclusão.
+- **Aba Tabela de Dados**: matriz ponto × datas de coleta, com **exportação para Excel**.
 
 ## 7. Biblioteca de Defeitos — *admin*
 - Catálogo de defeitos com: nome, categoria, **tipo (vibração / termografia / ambos)**,
