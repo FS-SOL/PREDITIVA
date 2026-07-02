@@ -3,9 +3,25 @@ import api from "../lib/api";
 import { useAuth } from "../contexts/AuthContext";
 import { formatDate } from "../lib/dates";
 import StatusBadge from "../components/StatusBadge";
-import { Upload, Search, TrendingUp, Download, Gauge, LayoutGrid, Trash2 } from "lucide-react";
+import { Upload, Search, TrendingUp, Download, Gauge, LayoutGrid, Trash2, Table2 } from "lucide-react";
 import { toast } from "sonner";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
+
+const STATUS_COLOR = { OK: "#22C55E", A1: "#FACC15", A2: "#F97316", Parado: "#EF4444", "Sem diag.": "#94A3B8" };
+const ALARM_COLOR = { OK: "#DCFCE7", A1: "#FEF9C3", A2: "#FFEDD5", Parado: "#FEE2E2" };
+
+function isoAlarm(valor, unidade, deteccao) {
+  const v = Number(valor);
+  if (Number.isNaN(v)) return "OK";
+  const u = (unidade || "").toLowerCase();
+  const d = (deteccao || "").toLowerCase();
+  const isVel = u.includes("mm/s") || d.includes("veloc");
+  const isAcc = u.trim() === "g" || u.includes("m/s") || d.includes("acel");
+  if (isAcc && !isVel) {
+    if (v <= 2) return "OK"; if (v <= 5) return "A1"; if (v <= 10) return "A2"; return "Parado";
+  }
+  if (v <= 2.8) return "OK"; if (v <= 7.1) return "A1"; if (v <= 11) return "A2"; return "Parado";
+}
 
 export default function Vibracao() {
   const { user } = useAuth();
@@ -30,7 +46,7 @@ export default function Vibracao() {
   };
   useEffect(() => { load(); }, []);
 
-  // Latest measurement per (machine, ponto, deteccao) — keep history, show only current
+  // Latest measurement per (machine, ponto, deteccao) — preserva ordem da planilha
   const latestByPoint = useMemo(() => {
     const map = {};
     for (const m of measurements) {
@@ -38,10 +54,9 @@ export default function Vibracao() {
       const cur = map[key];
       if (!cur || (m.data || "") > (cur.data || "")) map[key] = m;
     }
-    return Object.values(map);
+    return Object.values(map).sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
   }, [measurements]);
 
-  // Peak per machine (from current values)
   const peakByMachine = useMemo(() => {
     const map = {};
     for (const m of latestByPoint) {
@@ -51,37 +66,51 @@ export default function Vibracao() {
     return map;
   }, [latestByPoint]);
 
-  // Distinct machines that have measurements (for the dropdown)
+  const diagsByMachine = useMemo(() => {
+    const map = {};
+    for (const d of diagnostics) {
+      (map[d.machine_id] = map[d.machine_id] || []).push(d);
+    }
+    Object.values(map).forEach((arr) => arr.sort((a, b) => (a.data || "").localeCompare(b.data || "")));
+    return map;
+  }, [diagnostics]);
+
   const measuredMachines = useMemo(() => {
     const seen = {};
-    for (const m of measurements) {
-      if (!seen[m.machine_id]) seen[m.machine_id] = m.machine_tag || m.machine_id;
-    }
+    for (const m of measurements) if (!seen[m.machine_id]) seen[m.machine_id] = m.machine_tag || m.machine_id;
     return Object.entries(seen).map(([id, tag]) => ({ id, tag })).sort((a, b) => a.tag.localeCompare(b.tag));
   }, [measurements]);
 
   const filtered = useMemo(
-    () => machines.filter((m) =>
-      !q || [m.tag, m.equipamento, m.local, m.descricao].some((v) => (v || "").toLowerCase().includes(q.toLowerCase()))
-    ),
+    () => machines.filter((m) => !q || [m.tag, m.equipamento, m.local, m.descricao].some((v) => (v || "").toLowerCase().includes(q.toLowerCase()))),
     [machines, q]
   );
 
   const medicoesRows = useMemo(() => {
     return latestByPoint
       .filter((m) => machineFilter === "todas" || m.machine_id === machineFilter)
-      .filter((m) => !q || [m.machine_tag, m.subconjunto, m.ponto, m.deteccao].some((v) => (v || "").toLowerCase().includes(q.toLowerCase())))
-      .sort((a, b) => (a.machine_tag || "").localeCompare(b.machine_tag || "") || (a.ponto || "").localeCompare(b.ponto || ""));
+      .filter((m) => !q || [m.machine_tag, m.subconjunto, m.ponto, m.deteccao].some((v) => (v || "").toLowerCase().includes(q.toLowerCase())));
   }, [latestByPoint, machineFilter, q]);
 
-  const trend = useMemo(() => {
-    if (!selected) return [];
-    return measurements
-      .filter((m) => m.machine_id === selected.id)
-      .map((m, i) => ({ idx: i + 1, valor: m.valor, ponto: m.ponto, data: formatDate(m.data) }));
-  }, [selected, measurements]);
+  // Pivot: linhas = equipamento/ponto, colunas = datas
+  const pivot = useMemo(() => {
+    const src = measurements
+      .filter((m) => machineFilter === "todas" || m.machine_id === machineFilter)
+      .filter((m) => !q || [m.machine_tag, m.ponto, m.deteccao].some((v) => (v || "").toLowerCase().includes(q.toLowerCase())));
+    const dateSet = new Set();
+    const rowMap = {};
+    for (const m of src) {
+      const dt = formatDate(m.data);
+      dateSet.add(dt);
+      const key = `${m.machine_id}||${m.ponto}||${m.deteccao}`;
+      if (!rowMap[key]) rowMap[key] = { machine_tag: m.machine_tag, ponto: m.ponto, deteccao: m.deteccao, unidade: m.unidade, ordem: m.ordem || 0, values: {} };
+      rowMap[key].values[dt] = m.valor;
+    }
+    const dates = Array.from(dateSet).sort((a, b) => a.split("/").reverse().join("").localeCompare(b.split("/").reverse().join("")));
+    const rows = Object.values(rowMap).sort((a, b) => (a.machine_tag || "").localeCompare(b.machine_tag || "") || (a.ordem - b.ordem));
+    return { dates, rows };
+  }, [measurements, machineFilter, q]);
 
-  // Trend history for a single point (modal)
   const pointHistory = useMemo(() => {
     if (!trendPoint) return [];
     return measurements
@@ -89,6 +118,11 @@ export default function Vibracao() {
       .sort((a, b) => (a.data || "").localeCompare(b.data || ""))
       .map((m) => ({ data: formatDate(m.data), valor: m.valor }));
   }, [trendPoint, measurements]);
+
+  const selectedPoints = useMemo(() => {
+    if (!selected) return [];
+    return latestByPoint.filter((m) => m.machine_id === selected.id);
+  }, [selected, latestByPoint]);
 
   const upload = async (e) => {
     const f = e.target.files?.[0];
@@ -100,9 +134,7 @@ export default function Vibracao() {
       const { data } = await api.post(`/measurements/import`, fd, { headers: { "Content-Type": "multipart/form-data" } });
       toast.success(`Importadas ${data.inserted} medidas${data.skipped ? ` (${data.skipped} ignoradas)` : ""}`);
       load();
-    } catch (err) {
-      toast.error("Falha na importação");
-    }
+    } catch (err) { toast.error("Falha na importação"); }
     fileRef.current.value = "";
   };
 
@@ -112,15 +144,10 @@ export default function Vibracao() {
       const res = await api.get("/measurements/template", { responseType: "blob" });
       const url = window.URL.createObjectURL(new Blob([res.data]));
       const a = document.createElement("a");
-      a.href = url;
-      a.download = "template_overall_vibracao.xlsx";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      a.href = url; a.download = "template_overall_vibracao.xlsx";
+      document.body.appendChild(a); a.click(); a.remove();
       window.URL.revokeObjectURL(url);
-    } catch (err) {
-      toast.error("Falha ao gerar template");
-    }
+    } catch (err) { toast.error("Falha ao gerar template"); }
   };
 
   const deletePoint = async (m) => {
@@ -129,10 +156,14 @@ export default function Vibracao() {
       await api.delete(`/measurements/point/clear`, { params: { machine_id: m.machine_id, ponto: m.ponto || "", deteccao: m.deteccao || "" } });
       toast.success("Medições excluídas");
       load();
-    } catch (err) {
-      toast.error("Falha ao excluir");
-    }
+    } catch (err) { toast.error("Falha ao excluir"); }
   };
+
+  const TabBtn = ({ id, icon: Icon, label, testid }) => (
+    <button data-testid={testid} onClick={() => setTab(id)} className={`px-4 py-2 text-sm font-medium flex items-center gap-2 border-b-2 -mb-px transition-colors ${tab === id ? "border-slate-900 text-slate-900" : "border-transparent text-slate-500 hover:text-slate-700"}`}>
+      <Icon size={15} /> {label}
+    </button>
+  );
 
   return (
     <div className="space-y-4" data-testid="vibracao-page">
@@ -155,12 +186,9 @@ export default function Vibracao() {
       </div>
 
       <div className="flex gap-1 border-b border-slate-200">
-        <button data-testid="tab-maquinas" onClick={() => setTab("maquinas")} className={`px-4 py-2 text-sm font-medium flex items-center gap-2 border-b-2 -mb-px transition-colors ${tab === "maquinas" ? "border-slate-900 text-slate-900" : "border-transparent text-slate-500 hover:text-slate-700"}`}>
-          <LayoutGrid size={15} /> Máquinas
-        </button>
-        <button data-testid="tab-medicoes" onClick={() => setTab("medicoes")} className={`px-4 py-2 text-sm font-medium flex items-center gap-2 border-b-2 -mb-px transition-colors ${tab === "medicoes" ? "border-slate-900 text-slate-900" : "border-transparent text-slate-500 hover:text-slate-700"}`}>
-          <Gauge size={15} /> Medições
-        </button>
+        <TabBtn id="maquinas" icon={LayoutGrid} label="Máquinas" testid="tab-maquinas" />
+        <TabBtn id="medicoes" icon={Gauge} label="Medições" testid="tab-medicoes" />
+        <TabBtn id="tabela" icon={Table2} label="Tabela de Dados" testid="tab-tabela" />
       </div>
 
       <div className="flex flex-wrap gap-2 items-center">
@@ -168,7 +196,7 @@ export default function Vibracao() {
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={tab === "maquinas" ? "Buscar máquina..." : "Buscar medição..."} className="w-full h-10 pl-9 pr-3 border border-slate-300 rounded-md text-sm bg-white" />
         </div>
-        {tab === "medicoes" && (
+        {tab !== "maquinas" && (
           <select data-testid="medicoes-machine-filter" value={machineFilter} onChange={(e) => setMachineFilter(e.target.value)} className="h-10 px-3 border border-slate-300 rounded-md text-sm bg-white">
             <option value="todas">Todas as máquinas ({measuredMachines.length})</option>
             {measuredMachines.map((mm) => <option key={mm.id} value={mm.id}>{mm.tag}</option>)}
@@ -181,17 +209,13 @@ export default function Vibracao() {
           {filtered.map((m) => {
             const points = latestByPoint.filter((x) => x.machine_id === m.id).length;
             const peak = peakByMachine[m.id];
-            const machineDiags = diagnostics.filter((d) => d.machine_id === m.id);
-            const isDiag = machineDiags.length > 0;
-            const last = isDiag ? machineDiags.sort((a, b) => (b.data || "").localeCompare(a.data || ""))[0] : null;
+            const hist = diagsByMachine[m.id] || [];
+            const isDiag = hist.length > 0;
+            const last = isDiag ? hist[hist.length - 1] : null;
             const displayStatus = isDiag ? m.status : "Sem diag.";
             return (
-              <button
-                key={m.id}
-                data-testid={`vibracao-card-${m.tag}`}
-                onClick={() => setSelected(m)}
-                className="bg-white border border-slate-200 rounded-lg p-4 text-left hover:border-slate-900 hover:shadow-sm transition-all"
-              >
+              <button key={m.id} data-testid={`vibracao-card-${m.tag}`} onClick={() => setSelected(m)}
+                className="bg-white border border-slate-200 rounded-lg p-4 text-left hover:border-slate-900 hover:shadow-sm transition-all">
                 <div className="flex items-start justify-between mb-2 gap-2">
                   <div className="font-mono font-bold text-sm truncate">{m.tag}</div>
                   <StatusBadge status={displayStatus} />
@@ -203,14 +227,19 @@ export default function Vibracao() {
                   <span className="font-mono">{points} pontos</span>
                 </div>
                 <div className="mt-1 text-[11px]" data-testid={`vibracao-peak-${m.tag}`}>
-                  {peak ? (
-                    <span className="font-mono text-amber-700">Pico: {peak.valor} {peak.unidade} @ {peak.ponto || "—"}</span>
-                  ) : (
-                    <span className="text-slate-400 italic">Sem medições</span>
-                  )}
+                  {peak ? <span className="font-mono text-amber-700">Pico: {peak.valor} {peak.unidade} @ {peak.ponto || "—"}</span> : <span className="text-slate-400 italic">Sem medições</span>}
                 </div>
-                <div className="mt-0.5 text-[11px]">
-                  {last ? <span className="font-mono text-emerald-700">Últ. diag: {formatDate(last.data)}</span> : <span className="text-slate-400 italic">Sem diagnóstico</span>}
+                <div className="mt-2 flex items-center gap-1 flex-wrap" data-testid={`vibracao-timeline-${m.tag}`}>
+                  {hist.length === 0 ? (
+                    <span className="text-[11px] text-slate-400 italic">Sem diagnóstico</span>
+                  ) : (
+                    <>
+                      {hist.map((d) => (
+                        <span key={d.id} title={`${(d.data || "").slice(0, 10)} — ${d.status}`} className="w-2.5 h-2.5 rounded-full border border-white shadow-sm" style={{ background: STATUS_COLOR[d.status] || "#94A3B8" }} />
+                      ))}
+                      <span className="text-[10px] text-slate-500 ml-1 font-mono">{formatDate(last.data)}</span>
+                    </>
+                  )}
                 </div>
               </button>
             );
@@ -246,15 +275,49 @@ export default function Vibracao() {
                   </td>
                   {canEdit && (
                     <td>
-                      <button data-testid={`del-meas-${m.id}`} onClick={() => deletePoint(m)} className="p-1 hover:bg-red-100 rounded text-red-600">
-                        <Trash2 size={14} />
-                      </button>
+                      <button data-testid={`del-meas-${m.id}`} onClick={() => deletePoint(m)} className="p-1 hover:bg-red-100 rounded text-red-600"><Trash2 size={14} /></button>
                     </td>
                   )}
                 </tr>
               ))}
               {medicoesRows.length === 0 && (
                 <tr><td colSpan={canEdit ? 10 : 9} className="text-center text-slate-500 py-8">Nenhuma medição. Baixe o template, preencha e importe em "Importar Overall".</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {tab === "tabela" && (
+        <div className="bg-white border border-slate-200 rounded-lg overflow-auto" data-testid="tabela-dados">
+          <table className="fs-table w-full text-sm">
+            <thead>
+              <tr>
+                <th className="sticky left-0 bg-slate-100 z-10">Equipamento</th>
+                <th>Ponto</th><th>Detecção</th><th>Un.</th>
+                {pivot.dates.map((d) => <th key={d} className="whitespace-nowrap text-center">{d}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {pivot.rows.map((r, i) => (
+                <tr key={i} data-testid={`tabela-row-${i}`}>
+                  <td className="font-mono text-xs sticky left-0 bg-white z-10">{r.machine_tag}</td>
+                  <td>{r.ponto || "—"}</td>
+                  <td className="text-xs">{r.deteccao || "—"}</td>
+                  <td className="text-xs">{r.unidade || "—"}</td>
+                  {pivot.dates.map((d) => {
+                    const v = r.values[d];
+                    const al = v !== undefined ? isoAlarm(v, r.unidade, r.deteccao) : null;
+                    return (
+                      <td key={d} className="text-center font-mono" style={al ? { background: ALARM_COLOR[al] } : undefined}>
+                        {v !== undefined ? v : "—"}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+              {pivot.rows.length === 0 && (
+                <tr><td colSpan={4 + pivot.dates.length} className="text-center text-slate-500 py-8">Sem dados. Importe medições para montar o histórico por datas.</td></tr>
               )}
             </tbody>
           </table>
@@ -272,7 +335,7 @@ export default function Vibracao() {
                 <LineChart data={pointHistory}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                   <XAxis dataKey="data" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 11 }} unit={` ${trendPoint.unidade || ""}`} />
+                  <YAxis tick={{ fontSize: 11 }} />
                   <Tooltip />
                   <Line type="monotone" dataKey="valor" stroke="#0F172A" strokeWidth={2} dot={{ r: 3 }} />
                 </LineChart>
@@ -284,9 +347,10 @@ export default function Vibracao() {
         </div>
       )}
 
+      {/* Machine detail modal — pontos por ponto */}
       {selected && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setSelected(null)}>
-          <div className="bg-white rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()} data-testid="machine-modal">
             <div className="flex items-start justify-between mb-4">
               <div>
                 <h3 className="font-display font-bold text-xl">{selected.tag}</h3>
@@ -300,32 +364,31 @@ export default function Vibracao() {
               <div className="bg-slate-50 p-3 rounded"><div className="text-xs text-slate-500">Criticidade</div><div className="font-mono font-semibold">{selected.criticidade}</div></div>
             </div>
 
-            <h4 className="font-semibold flex items-center gap-2 mb-2"><TrendingUp size={16}/> Linha de Tendência</h4>
-            {trend.length > 0 ? (
-              <ResponsiveContainer width="100%" height={260}>
-                <LineChart data={trend}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
-                  <XAxis dataKey="idx" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 11 }} />
-                  <Tooltip />
-                  <Line type="monotone" dataKey="valor" stroke="#0F172A" strokeWidth={2} dot={{ r: 3 }} />
-                </LineChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="text-sm text-slate-500 bg-slate-50 p-4 rounded">Importe medidas para gerar a tendência.</div>
-            )}
-
-            {trend.length > 0 && (
-              <div className="mt-4 overflow-auto max-h-[200px]">
-                <table className="fs-table">
-                  <thead><tr><th>#</th><th>Ponto</th><th>Valor</th><th>Data</th></tr></thead>
+            <h4 className="font-semibold flex items-center gap-2 mb-2"><Gauge size={16}/> Pontos e valores atuais</h4>
+            {selectedPoints.length > 0 ? (
+              <div className="overflow-auto">
+                <table className="fs-table w-full">
+                  <thead><tr><th>Ponto</th><th>Detecção</th><th>Valor</th><th>Un.</th><th>Alarme</th><th>Tendência</th></tr></thead>
                   <tbody>
-                    {trend.map((t, i) => (
-                      <tr key={i}><td className="font-mono">{t.idx}</td><td>{t.ponto}</td><td className="font-mono">{t.valor}</td><td>{t.data}</td></tr>
+                    {selectedPoints.map((p) => (
+                      <tr key={p.id}>
+                        <td>{p.ponto || "—"}</td>
+                        <td className="text-xs">{p.deteccao || "—"}</td>
+                        <td className="font-mono font-semibold">{p.valor}</td>
+                        <td>{p.unidade}</td>
+                        <td><StatusBadge status={p.alarme} /></td>
+                        <td>
+                          <button data-testid={`modal-trend-${p.id}`} onClick={() => setTrendPoint(p)} className="p-1 hover:bg-slate-100 rounded text-slate-700 inline-flex items-center gap-1 text-xs">
+                            <TrendingUp size={14} /> Ver
+                          </button>
+                        </td>
+                      </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+            ) : (
+              <div className="text-sm text-slate-500 bg-slate-50 p-4 rounded">Sem medições importadas para esta máquina.</div>
             )}
           </div>
         </div>

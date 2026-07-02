@@ -5,9 +5,11 @@ import { Plus, Edit2, Trash2, BookOpen } from "lucide-react";
 import { toast } from "sonner";
 
 const empty = {
-  nome: "", categoria: "mecanico", sintomas: "", frequencias: "", causas: "",
+  nome: "", categoria: "mecanico", tipo: "vibracao", sintomas: "", frequencias: "", causas: "",
   consequencias: "", acoes: "", diagnostico: "", recomendacao: "", alarme: "A1", ativo: true,
 };
+
+const TIPO_LABEL = { vibracao: "Vibração", termografia: "Termografia", ambos: "Ambos" };
 
 export default function BibliotecaDefeitos() {
   const [items, setItems] = useState([]);
@@ -60,7 +62,10 @@ export default function BibliotecaDefeitos() {
               <h3 className="font-display font-bold text-slate-900 text-sm leading-tight">{d.nome}</h3>
               <StatusBadge status={d.alarme} />
             </div>
-            <div className="text-[10px] uppercase tracking-wider font-mono text-slate-500 mb-2">{d.categoria}</div>
+            <div className="text-[10px] uppercase tracking-wider font-mono text-slate-500 mb-2 flex items-center gap-2">
+              <span>{d.categoria}</span>
+              <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{TIPO_LABEL[d.tipo] || d.tipo || "—"}</span>
+            </div>
             <div className="text-xs text-slate-600 space-y-1 flex-1">
               {d.sintomas && <div><b>Sintomas:</b> {d.sintomas}</div>}
               {d.frequencias && <div><b>Freq.:</b> {d.frequencias}</div>}
@@ -86,10 +91,18 @@ export default function BibliotecaDefeitos() {
               <div>
                 <label className="text-xs uppercase font-semibold text-slate-600">Categoria</label>
                 <select value={editing.categoria} onChange={(e) => setEditing({ ...editing, categoria: e.target.value })} className="mt-1 w-full h-9 px-3 border border-slate-300 rounded-md text-sm bg-white">
-                  {["mecanico", "eletrico", "rolamento", "lubrificacao", "hidraulico", "termografia"].map((o) => <option key={o}>{o}</option>)}
+                  {["mecanico", "eletrico", "rolamento", "lubrificacao", "hidraulico", "termografia", "geral"].map((o) => <option key={o}>{o}</option>)}
                 </select>
               </div>
               <div>
+                <label className="text-xs uppercase font-semibold text-slate-600">Tipo (aplicação)</label>
+                <select data-testid="defect-field-tipo" value={editing.tipo || "vibracao"} onChange={(e) => setEditing({ ...editing, tipo: e.target.value })} className="mt-1 w-full h-9 px-3 border border-slate-300 rounded-md text-sm bg-white">
+                  <option value="vibracao">Vibração</option>
+                  <option value="termografia">Termografia</option>
+                  <option value="ambos">Ambos</option>
+                </select>
+              </div>
+              <div className="col-span-2">
                 <label className="text-xs uppercase font-semibold text-slate-600">Alarme</label>
                 <select data-testid="defect-field-alarme" value={editing.alarme} onChange={(e) => setEditing({ ...editing, alarme: e.target.value })} className="mt-1 w-full h-9 px-3 border border-slate-300 rounded-md text-sm bg-white">
                   {["OK", "A1", "A2", "Parado"].map((o) => <option key={o}>{o}</option>)}

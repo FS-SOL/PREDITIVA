@@ -14,6 +14,7 @@ import {
   ChevronLeft,
   ChevronRight,
   FileText,
+  ShieldAlert,
 } from "lucide-react";
 
 const NAV = [
@@ -25,6 +26,7 @@ const NAV = [
   { to: "/defeitos", label: "Biblioteca Defeitos", icon: BookOpen, testid: "nav-defeitos", admin: true },
   { to: "/diagnostico", label: "Diagnóstico", icon: Stethoscope, testid: "nav-diagnostico" },
   { to: "/relatorios", label: "Relatórios", icon: FileText, testid: "nav-relatorios" },
+  { to: "/auditoria", label: "Auditoria", icon: ShieldAlert, testid: "nav-auditoria", adminOnly: true },
   { to: "/usuarios", label: "Usuários", icon: Users, testid: "nav-usuarios", admin: true },
 ];
 
@@ -58,7 +60,11 @@ export default function Layout() {
         </div>
 
         <nav className="flex-1 px-2 py-3 space-y-0.5">
-          {NAV.filter((n) => !(n.admin && user?.role === "visualizador")).map((n) => (
+          {NAV.filter((n) => {
+            if (n.adminOnly && user?.role !== "admin") return false;
+            if (n.admin && user?.role === "visualizador") return false;
+            return true;
+          }).map((n) => (
             <NavLink
               key={n.to}
               to={n.to}

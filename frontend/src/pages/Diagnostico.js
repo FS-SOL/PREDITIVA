@@ -239,7 +239,7 @@ export default function Diagnostico() {
           <div className="bg-white border border-slate-200 rounded-lg p-4">
             <div className="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-2">1. Marque os Defeitos</div>
             <div className="space-y-1.5 max-h-[60vh] overflow-auto">
-              {defects.map((d) => (
+              {defects.filter((d) => machine.tipo === "ambos" || d.tipo === "ambos" || d.tipo === machine.tipo).map((d) => (
                 <label key={d.id} data-testid={`defect-check-${d.id}`} className="flex items-start gap-2 p-2 rounded hover:bg-slate-50 cursor-pointer">
                   <input type="checkbox" checked={selectedDefectIds.includes(d.id)} onChange={() => toggleDefect(d.id)} className="mt-0.5" disabled={!canEdit} />
                   <div className="flex-1">
@@ -310,7 +310,10 @@ export default function Diagnostico() {
                 <div key={d.id} className="border border-slate-200 rounded-md p-3">
                   <div className="flex items-center justify-between mb-1">
                     <div className="font-mono text-xs text-slate-500">{formatDateTime(d.data)}</div>
-                    <StatusBadge status={d.status} />
+                    <div className="flex items-center gap-2">
+                      <StatusBadge status={d.status} />
+                      {canEdit && <button data-testid={`del-diag-hist-${d.id}`} onClick={async () => { if (window.confirm('Excluir diagnóstico?')) { await api.delete(`/diagnostics/${d.id}`); toast.success('Excluído'); setExpandedMachine(null); load(); } }} className="p-1 hover:bg-red-100 rounded text-red-600"><Trash2 size={14} /></button>}
+                    </div>
                   </div>
                   <div className="text-sm font-medium">{d.diagnostico}</div>
                   {d.causa && <div className="text-xs text-slate-600 mt-1"><b>Causa:</b> {d.causa}</div>}

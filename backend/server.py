@@ -117,6 +117,23 @@ def require_editor(user=Depends(get_current_user)) -> dict:
         raise HTTPException(status_code=403, detail="Permissão negada: usuário somente leitura")
     return user
 
+def require_admin(user=Depends(get_current_user)) -> dict:
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Permissão negada: requer administrador")
+    return user
+
+async def log_deletion(user: dict, entity_type: str, description: str, details: Optional[dict] = None):
+    await db.deletion_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "entity_type": entity_type,
+        "description": description,
+        "details": details or {},
+        "user_id": user.get("id"),
+        "user_name": user.get("name", ""),
+        "user_email": user.get("email", ""),
+        "data": now_iso(),
+    })
+
 # ============== Models ==============
 class UserCreate(BaseModel):
     email: EmailStr
@@ -169,6 +186,7 @@ class DefectModel(BaseModel):
     diagnostico: Optional[str] = ""
     recomendacao: Optional[str] = ""
     alarme: Optional[str] = "A1"  # OK, A1, A2, Parado
+    tipo: Optional[str] = "vibracao"  # vibracao, termografia, ambos
     ativo: bool = True
 
 class DiagnosticoModel(BaseModel):
@@ -193,6 +211,7 @@ class MeasurementModel(BaseModel):
     valor: float
     unidade: str
     deteccao: str
+    ordem: Optional[int] = 0
     data: Optional[str] = None
 
 # ============== Seeds ==============
@@ -207,7 +226,12 @@ DEFAULT_DEFECTS = [
     {"nome": "Barra Quebrada (Motor)", "categoria": "eletrico", "sintomas": "Bandas laterais em ±2sLs em torno de 1xRPM", "frequencias": "1xRPM ± 2sLs", "causas": "Fadiga em barras do rotor, alta carga", "consequencias": "Perda de torque, falha do motor", "acoes": "Análise elétrica, rebobinamento", "diagnostico": "Barras quebradas no rotor do motor", "recomendacao": "Programar revisão elétrica do motor", "alarme": "A2"},
     {"nome": "Engrenagem - GMF", "categoria": "mecanico", "sintomas": "Picos em GMF e harmônicas, bandas laterais", "frequencias": "GMF ± Frequência do eixo", "causas": "Desgaste de dentes, dentes quebrados", "consequencias": "Falha de redutor", "acoes": "Inspecionar redutor", "diagnostico": "Defeito em engrenamento", "recomendacao": "Programar inspeção do redutor", "alarme": "A1"},
     {"nome": "Lubrificação Inadequada", "categoria": "lubrificacao", "sintomas": "Aumento gradual em alta frequência, envelope elevado", "frequencias": "Banda larga em alta frequência", "causas": "Falta ou excesso de graxa, contaminação", "consequencias": "Aceleração de falha em rolamentos", "acoes": "Relubrificar conforme plano", "diagnostico": "Lubrificação deficiente", "recomendacao": "Aplicar plano de lubrificação", "alarme": "A1"},
-    {"nome": "Aquecimento Excessivo (Termografia)", "categoria": "termografia", "sintomas": "Temperatura acima do esperado em mancal/conexão", "frequencias": "—", "causas": "Sobrecarga, mau contato, lubrificação", "consequencias": "Falha do componente", "acoes": "Inspeção termográfica, ajustes", "diagnostico": "Ponto quente identificado", "recomendacao": "Inspecionar conexão/mancal", "alarme": "A1"},
+    {"nome": "Aquecimento Excessivo (Termografia)", "categoria": "termografia", "sintomas": "Temperatura acima do esperado em mancal/conexão", "frequencias": "—", "causas": "Sobrecarga, mau contato, lubrificação", "consequencias": "Falha do componente", "acoes": "Inspeção termográfica, ajustes", "diagnostico": "Ponto quente identificado", "recomendacao": "Inspecionar conexão/mancal", "alarme": "A1", "tipo": "termografia"},
+    {"nome": "Equipamento em Bom Estado", "categoria": "geral", "sintomas": "Sem anomalias; níveis dentro dos limites normais", "frequencias": "—", "causas": "—", "consequencias": "—", "acoes": "Manter monitoramento periódico", "diagnostico": "Equipamento operando em condições normais. Nenhuma anomalia detectada nas medições/inspeção.", "recomendacao": "Manter plano de manutenção preditiva e a periodicidade de coleta.", "alarme": "OK", "tipo": "ambos"},
+    {"nome": "Ponto Quente em Conexão Elétrica", "categoria": "termografia", "sintomas": "Sobreaquecimento localizado em terminal/borne comparado às demais fases", "frequencias": "—", "causas": "Aperto inadequado, oxidação, subdimensionamento", "consequencias": "Rompimento do condutor, incêndio, parada não planejada", "acoes": "Reapertar conexão, tratar oxidação, reavaliar", "diagnostico": "Ponto quente em conexão elétrica (ΔT elevado)", "recomendacao": "Programar correção da conexão na próxima parada", "alarme": "A2", "tipo": "termografia"},
+    {"nome": "Sobrecarga / Sobreaquecimento", "categoria": "termografia", "sintomas": "Aquecimento generalizado do componente/cabo", "frequencias": "—", "causas": "Corrente acima da nominal, ventilação deficiente", "consequencias": "Degradação de isolação, redução de vida útil", "acoes": "Avaliar carga, balanceamento e ventilação", "diagnostico": "Sobrecarga térmica identificada", "recomendacao": "Revisar carregamento e dimensionamento", "alarme": "A1", "tipo": "termografia"},
+    {"nome": "Mau Contato / Conexão Frouxa", "categoria": "termografia", "sintomas": "Aquecimento pontual em conexão, variável com a carga", "frequencias": "—", "causas": "Conexão frouxa, contato deficiente", "consequencias": "Falha do circuito, arco elétrico", "acoes": "Reaperto e limpeza da conexão", "diagnostico": "Mau contato em conexão", "recomendacao": "Corrigir conexão com equipe elétrica", "alarme": "A2", "tipo": "termografia"},
+    {"nome": "Desequilíbrio de Fases", "categoria": "termografia", "sintomas": "Temperaturas diferentes entre as três fases", "frequencias": "—", "causas": "Carga desequilibrada, conexão deficiente em uma fase", "consequencias": "Aquecimento e perdas, atuação de proteção", "acoes": "Avaliar corrente por fase e equilibrar cargas", "diagnostico": "Desequilíbrio térmico entre fases", "recomendacao": "Balancear cargas do quadro", "alarme": "A1", "tipo": "termografia"},
 ]
 
 async def seed_data():
@@ -240,11 +264,16 @@ async def seed_data():
 
     # Defects
     for d in DEFAULT_DEFECTS:
+        tipo = d.get("tipo") or ("termografia" if d.get("categoria") == "termografia" else "vibracao")
+        base = {k: v for k, v in d.items() if k != "tipo"}
         await db.defects.update_one(
             {"nome": d["nome"]},
-            {"$setOnInsert": {**d, "id": str(uuid.uuid4()), "ativo": True, "created_at": now_iso()}},
+            {"$set": {"tipo": tipo},
+             "$setOnInsert": {**base, "id": str(uuid.uuid4()), "ativo": True, "created_at": now_iso()}},
             upsert=True,
         )
+    # backfill tipo for any legacy defect missing it
+    await db.defects.update_many({"tipo": {"$exists": False}}, {"$set": {"tipo": "vibracao"}})
 
     # Empresa
     empresa = await db.plant_nodes.find_one({"type": "empresa"})
@@ -331,7 +360,10 @@ async def update_plant(node_id: str, payload: PlantNode, user=Depends(require_ed
 
 @api.delete("/plants/{node_id}")
 async def delete_plant(node_id: str, user=Depends(require_editor)):
+    node = await db.plant_nodes.find_one({"id": node_id}, {"_id": 0})
     await db.plant_nodes.delete_one({"id": node_id})
+    if node:
+        await log_deletion(user, "planta", f"{node.get('type','')}: {node.get('name','')}", {"id": node_id})
     return {"ok": True}
 
 # ============== Machines ==============
@@ -373,8 +405,12 @@ async def update_machine(machine_id: str, payload: MachineModel, user=Depends(re
 
 @api.delete("/machines/{machine_id}")
 async def delete_machine(machine_id: str, user=Depends(require_editor)):
+    machine = await db.machines.find_one({"id": machine_id}, {"_id": 0})
+    n_meas = await db.measurements.count_documents({"machine_id": machine_id})
     await db.machines.delete_one({"id": machine_id})
     await db.measurements.delete_many({"machine_id": machine_id})
+    if machine:
+        await log_deletion(user, "máquina", f"TAG {machine.get('tag','')}", {"id": machine_id, "medicoes_removidas": n_meas})
     return {"ok": True}
 
 @api.post("/machines/import")
@@ -504,7 +540,10 @@ async def update_defect(defect_id: str, payload: DefectModel, user=Depends(requi
 
 @api.delete("/defects/{defect_id}")
 async def delete_defect(defect_id: str, user=Depends(require_editor)):
+    d = await db.defects.find_one({"id": defect_id}, {"_id": 0})
     await db.defects.delete_one({"id": defect_id})
+    if d:
+        await log_deletion(user, "defeito", d.get("nome", ""), {"id": defect_id})
     return {"ok": True}
 
 # ============== Diagnostics ==============
@@ -543,7 +582,10 @@ async def update_diagnostic(diag_id: str, payload: DiagnosticoModel, user=Depend
 
 @api.delete("/diagnostics/{diag_id}")
 async def delete_diagnostic(diag_id: str, user=Depends(require_editor)):
+    d = await db.diagnostics.find_one({"id": diag_id}, {"_id": 0})
     await db.diagnostics.delete_one({"id": diag_id})
+    if d:
+        await log_deletion(user, "diagnóstico", f"{d.get('machine_tag','')}: {(d.get('diagnostico','') or '')[:80]}", {"id": diag_id, "status": d.get("status")})
     return {"ok": True}
 
 # ============== Measurements (Vibração) ==============
@@ -552,9 +594,14 @@ async def list_measurements(machine_id: Optional[str] = None, user=Depends(get_c
     qry: Dict[str, Any] = {}
     if machine_id:
         qry["machine_id"] = machine_id
-    items = await db.measurements.find(qry, {"_id": 0}).sort("data", 1).to_list(5000)
+    items = await db.measurements.find(qry, {"_id": 0}).sort([("ordem", 1), ("data", 1)]).to_list(20000)
     for it in items:
         it["alarme"] = iso_alarm(it.get("valor"), it.get("unidade", ""), it.get("deteccao", ""))
+    return items
+
+@api.get("/audit/deletions")
+async def list_deletions(user=Depends(require_admin)):
+    items = await db.deletion_logs.find({}, {"_id": 0}).sort("data", -1).to_list(3000)
     return items
 
 @api.get("/measurements/template")
@@ -596,6 +643,7 @@ async def import_measurements(machine_id: Optional[str] = Query(None), file: Upl
     ws = wb[wb.sheetnames[0]]
     inserted = 0
     skipped = 0
+    seq = 0
     header_idx: Dict[str, int] = {}
     headers_found = False
 
@@ -676,10 +724,12 @@ async def import_measurements(machine_id: Optional[str] = Query(None), file: Upl
                 "valor": valor,
                 "unidade": unidade,
                 "deteccao": deteccao,
+                "ordem": seq,
                 "data": now_iso(),
             }
             await db.measurements.insert_one(doc)
             inserted += 1
+            seq += 1
         except Exception as ex:
             logger.warning("Skip measurement: %s", ex)
             skipped += 1
@@ -696,15 +746,21 @@ async def create_measurement(payload: MeasurementModel, user=Depends(require_edi
 
 @api.delete("/measurements/{meas_id}")
 async def delete_measurement(meas_id: str, user=Depends(require_editor)):
+    m = await db.measurements.find_one({"id": meas_id}, {"_id": 0})
     res = await db.measurements.delete_one({"id": meas_id})
     if not res.deleted_count:
         raise HTTPException(404, "Medição não encontrada")
+    if m:
+        await log_deletion(user, "medição", f"{m.get('machine_tag','')} • {m.get('ponto','')} ({m.get('deteccao','')}) = {m.get('valor','')} {m.get('unidade','')}", {"id": meas_id})
     return {"ok": True}
 
 @api.delete("/measurements/point/clear")
 async def delete_measurement_point(machine_id: str = Query(...), ponto: str = Query(""), deteccao: str = Query(""), user=Depends(require_editor)):
     """Remove todo o histórico de um ponto (máquina + ponto + detecção)."""
+    sample = await db.measurements.find_one({"machine_id": machine_id, "ponto": ponto, "deteccao": deteccao}, {"_id": 0})
     res = await db.measurements.delete_many({"machine_id": machine_id, "ponto": ponto, "deteccao": deteccao})
+    if res.deleted_count and sample:
+        await log_deletion(user, "medição (ponto)", f"{sample.get('machine_tag','')} • {ponto} ({deteccao}) — {res.deleted_count} registro(s)", {"machine_id": machine_id, "ponto": ponto, "deteccao": deteccao})
     return {"ok": True, "deleted": res.deleted_count}
 
 # ============== Dashboard ==============
