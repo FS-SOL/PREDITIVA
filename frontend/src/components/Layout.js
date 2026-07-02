@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
+import api from "../lib/api";
 import {
   LayoutDashboard,
   Network,
@@ -16,10 +17,12 @@ import {
   FileText,
   ShieldAlert,
   BookText,
+  Building2,
 } from "lucide-react";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, testid: "nav-dashboard" },
+  { to: "/clientes", label: "Clientes", icon: Building2, testid: "nav-clientes", superOnly: true },
   { to: "/plantas", label: "Plantas", icon: Network, testid: "nav-plantas", admin: true },
   { to: "/maquinas", label: "Máquinas", icon: Cog, testid: "nav-maquinas" },
   { to: "/vibracao", label: "Análise Vibração", icon: Activity, testid: "nav-vibracao" },
@@ -32,10 +35,48 @@ const NAV = [
   { to: "/usuarios", label: "Usuários", icon: Users, testid: "nav-usuarios", admin: true },
 ];
 
+function TenantSwitcher() {
+  const { tenantId, setTenantId } = useAuth();
+  const [tenants, setTenants] = useState([]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data } = await api.get("/tenants");
+        setTenants(data);
+      } catch (e) { /* noop */ }
+    })();
+  }, []);
+
+  const onChange = (id) => {
+    setTenantId(id);
+    window.location.reload();
+  };
+
+  return (
+    <div className="flex items-center gap-2" data-testid="tenant-switcher">
+      <Building2 size={15} className="text-amber-500" />
+      <select
+        data-testid="tenant-select"
+        value={tenantId || ""}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-8 text-xs border border-slate-300 rounded-md px-2 bg-white text-slate-700 max-w-[220px]"
+      >
+        <option value="">— Selecione um cliente —</option>
+        {tenants.map((t) => (
+          <option key={t.id} value={t.id}>{t.name}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 export default function Layout() {
   const [collapsed, setCollapsed] = useState(false);
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const isSuper = user?.role === "superadmin";
+  const isAdmin = user?.role === "admin" || isSuper;
 
   return (
     <div className="min-h-screen flex bg-slate-50">
@@ -63,7 +104,8 @@ export default function Layout() {
 
         <nav className="flex-1 px-2 py-3 space-y-0.5">
           {NAV.filter((n) => {
-            if (n.adminOnly && user?.role !== "admin") return false;
+            if (n.superOnly && !isSuper) return false;
+            if (n.adminOnly && !isAdmin) return false;
             if (n.admin && user?.role === "visualizador") return false;
             return true;
           }).map((n) => (
@@ -88,6 +130,7 @@ export default function Layout() {
               <div className="text-xs text-slate-400">Logado como</div>
               <div className="text-sm font-medium truncate">{user?.name}</div>
               <div className="text-xs text-slate-400 truncate">{user?.email}</div>
+              {isSuper && <div className="text-[10px] text-amber-400 font-mono mt-0.5">SUPER-ADMIN</div>}
             </div>
           )}
           <button
@@ -106,11 +149,19 @@ export default function Layout() {
           <h1 className="font-display text-lg font-semibold text-slate-900">
             FS Soluções — Preditiva
           </h1>
-          <div className="ml-auto text-xs font-mono text-slate-500">
-            {new Date().toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })}
+          <div className="ml-auto flex items-center gap-4">
+            {isSuper && <TenantSwitcher />}
+            <div className="text-xs font-mono text-slate-500">
+              {new Date().toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })}
+            </div>
           </div>
         </header>
         <div className="p-6">
+          {isSuper && !localStorage.getItem("fs_tenant") && (
+            <div data-testid="no-tenant-banner" className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              Você é <b>Super-Admin</b>. Selecione um cliente no seletor acima para visualizar e gerenciar os dados, ou vá em <b>Clientes</b> para cadastrar um novo.
+            </div>
+          )}
           <Outlet />
         </div>
       </main>

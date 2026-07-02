@@ -5,13 +5,10 @@ import { Activity } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Login() {
-  const { user, login, register } = useAuth();
+  const { user, login } = useAuth();
   const navigate = useNavigate();
-  const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("admin@fssolucoes.com");
   const [password, setPassword] = useState("admin123");
-  const [name, setName] = useState("");
-  const [role, setRole] = useState("tecnico");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 
@@ -22,13 +19,8 @@ export default function Login() {
     setLoading(true);
     setErr("");
     try {
-      if (mode === "login") {
-        await login(email, password);
-        toast.success("Bem-vindo!");
-      } else {
-        await register({ email, password, name, role });
-        toast.success("Usuário criado!");
-      }
+      await login(email, password);
+      toast.success("Bem-vindo!");
       navigate("/");
     } catch (e) {
       const msg = e?.response?.data?.detail || "Falha na autenticação";
@@ -68,28 +60,9 @@ export default function Login() {
       <div className="flex items-center justify-center p-8 bg-white">
         <form onSubmit={submit} className="w-full max-w-sm space-y-5">
           <div>
-            <h1 className="font-display text-2xl font-bold text-slate-900">
-              {mode === "login" ? "Entrar" : "Criar conta"}
-            </h1>
-            <p className="text-sm text-slate-500 mt-1">
-              {mode === "login"
-                ? "Acesse o sistema com seu e-mail."
-                : "Cadastre um novo usuário do sistema."}
-            </p>
+            <h1 className="font-display text-2xl font-bold text-slate-900">Entrar</h1>
+            <p className="text-sm text-slate-500 mt-1">Acesse o sistema com seu e-mail.</p>
           </div>
-
-          {mode === "register" && (
-            <div>
-              <label className="text-xs font-semibold text-slate-600 uppercase tracking-wider">Nome</label>
-              <input
-                data-testid="register-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-                className="mt-1 w-full h-10 px-3 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
-              />
-            </div>
-          )}
 
           <div>
             <label className="text-xs font-semibold text-slate-600 uppercase tracking-wider">Email</label>
@@ -115,24 +88,7 @@ export default function Login() {
             />
           </div>
 
-          {mode === "register" && (
-            <div>
-              <label className="text-xs font-semibold text-slate-600 uppercase tracking-wider">Função</label>
-              <select
-                data-testid="register-role"
-                value={role}
-                onChange={(e) => setRole(e.target.value)}
-                className="mt-1 w-full h-10 px-3 border border-slate-300 rounded-md text-sm bg-white"
-              >
-                <option value="tecnico">Técnico</option>
-                <option value="gestor">Gestor</option>
-                <option value="visualizador">Visualizador</option>
-                <option value="admin">Administrador</option>
-              </select>
-            </div>
-          )}
-
-          {err && <div className="text-sm text-red-600">{err}</div>}
+          {err && <div className="text-sm text-red-600" data-testid="login-error">{err}</div>}
 
           <button
             data-testid="login-submit"
@@ -140,20 +96,11 @@ export default function Login() {
             disabled={loading}
             className="w-full h-10 bg-slate-900 text-white rounded-md text-sm font-semibold hover:bg-slate-800 transition-colors disabled:opacity-60"
           >
-            {loading ? "Aguarde..." : mode === "login" ? "Entrar" : "Criar conta"}
-          </button>
-
-          <button
-            data-testid="toggle-auth-mode"
-            type="button"
-            onClick={() => { setMode(mode === "login" ? "register" : "login"); setErr(""); }}
-            className="text-xs text-slate-600 hover:text-slate-900 underline w-full text-center"
-          >
-            {mode === "login" ? "Não tem conta? Criar nova conta" : "Já tem conta? Entrar"}
+            {loading ? "Aguarde..." : "Entrar"}
           </button>
 
           <div className="text-[11px] text-slate-400 text-center pt-4 border-t border-slate-100">
-            Credenciais padrão: admin@fssolucoes.com / admin123
+            Super-Admin: admin@fssolucoes.com / admin123
           </div>
         </form>
       </div>

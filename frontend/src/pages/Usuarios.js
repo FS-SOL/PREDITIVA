@@ -1,11 +1,9 @@
 import React, { useEffect, useState } from "react";
 import api from "../lib/api";
-import { useAuth } from "../contexts/AuthContext";
 import { Plus, Users as UsersIcon } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Usuarios() {
-  const { register } = useAuth();
   const [users, setUsers] = useState([]);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", password: "", role: "tecnico" });

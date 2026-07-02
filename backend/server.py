@@ -31,6 +31,9 @@ db = client[os.environ['DB_NAME']]
 JWT_ALGORITHM = "HS256"
 JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-change")
 
+# Collections that are isolated per tenant. (defects are GLOBAL/shared and excluded.)
+TENANT_COLLECTIONS = ["machines", "measurements", "thermal", "diagnostics", "plant_nodes", "deletion_logs", "users"]
+
 app = FastAPI(title="FS Soluções - Preditiva")
 api = APIRouter(prefix="/api")
 
@@ -145,6 +148,12 @@ async def get_current_user(request: Request) -> dict:
     user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
     if not user:
         raise HTTPException(status_code=401, detail="Usuário não encontrado")
+    # Resolve effective tenant scope.
+    if user.get("role") == "superadmin":
+        # Super-Admin operates on a tenant selected via the X-Tenant-Id header.
+        user["_scope_tenant"] = request.headers.get("X-Tenant-Id") or None
+    else:
+        user["_scope_tenant"] = user.get("tenant_id")
     return user
 
 def require_editor(user=Depends(get_current_user)) -> dict:
@@ -153,13 +162,32 @@ def require_editor(user=Depends(get_current_user)) -> dict:
     return user
 
 def require_admin(user=Depends(get_current_user)) -> dict:
-    if user.get("role") != "admin":
+    if user.get("role") not in ("admin", "superadmin"):
         raise HTTPException(status_code=403, detail="Permissão negada: requer administrador")
     return user
+
+def require_superadmin(user=Depends(get_current_user)) -> dict:
+    if user.get("role") != "superadmin":
+        raise HTTPException(status_code=403, detail="Permissão negada: requer super administrador")
+    return user
+
+def TQ(user: dict, extra: Optional[dict] = None) -> dict:
+    """Build a tenant-scoped Mongo query. Super-Admin without a selected tenant matches nothing."""
+    q = dict(extra or {})
+    q["tenant_id"] = user.get("_scope_tenant")
+    return q
+
+def write_tenant(user: dict) -> str:
+    """Return the tenant_id to stamp on writes, or raise if no tenant is in scope."""
+    tid = user.get("_scope_tenant")
+    if not tid:
+        raise HTTPException(status_code=400, detail="Selecione um cliente (tenant) para executar esta operação.")
+    return tid
 
 async def log_deletion(user: dict, entity_type: str, description: str, details: Optional[dict] = None):
     await db.deletion_logs.insert_one({
         "id": str(uuid.uuid4()),
+        "tenant_id": user.get("_scope_tenant"),
         "entity_type": entity_type,
         "description": description,
         "details": details or {},
@@ -185,6 +213,12 @@ class UserOut(BaseModel):
     email: str
     name: str
     role: str
+
+class TenantCreate(BaseModel):
+    name: str
+    admin_name: str
+    admin_email: EmailStr
+    admin_password: str
 
 class PlantNode(BaseModel):
     id: Optional[str] = None
@@ -274,14 +308,16 @@ async def seed_data():
     await db.users.create_index("email", unique=True)
     await db.defects.create_index("nome", unique=True)
     await db.plant_nodes.create_index([("type", 1), ("parent_id", 1)])
-    # Drop legacy unique index on tag (we now allow composite tag with subconjunto)
-    try:
-        await db.machines.drop_index("tag_1")
-    except Exception:
-        pass
-    await db.machines.create_index([("tag", 1), ("subconjunto", 1)], unique=True)
+    await db.tenants.create_index("id", unique=True)
+    # Drop legacy unique indexes on machines (now scoped per-tenant)
+    for idx in ("tag_1", "tag_1_subconjunto_1"):
+        try:
+            await db.machines.drop_index(idx)
+        except Exception:
+            pass
+    await db.machines.create_index([("tenant_id", 1), ("tag", 1), ("subconjunto", 1)], unique=True)
 
-    # Admin
+    # Admin (Super-Admin FS Soluções)
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@fssolucoes.com")
     admin_password = os.environ.get("ADMIN_PASSWORD", "admin123")
     existing = await db.users.find_one({"email": admin_email})
@@ -291,13 +327,14 @@ async def seed_data():
             "email": admin_email,
             "password_hash": hash_password(admin_password),
             "name": "Administrador",
-            "role": "admin",
+            "role": "superadmin",
+            "tenant_id": None,
             "created_at": now_iso(),
         })
     elif not verify_password(admin_password, existing.get("password_hash", "")):
         await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": hash_password(admin_password)}})
 
-    # Defects
+    # Defects (GLOBAL / shared across all tenants)
     for d in DEFAULT_DEFECTS:
         tipo = d.get("tipo") or ("termografia" if d.get("categoria") == "termografia" else "vibracao")
         base = {k: v for k, v in d.items() if k != "tipo"}
@@ -312,41 +349,110 @@ async def seed_data():
     # backfill ordem for any legacy measurement missing it
     await db.measurements.update_many({"ordem": {"$exists": False}}, {"$set": {"ordem": 0}})
 
-    # Empresa
-    empresa = await db.plant_nodes.find_one({"type": "empresa"})
-    if not empresa:
-        await db.plant_nodes.insert_one({
-            "id": str(uuid.uuid4()),
-            "name": "FS Soluções",
-            "type": "empresa",
-            "parent_id": None,
-            "created_at": now_iso(),
-        })
+
+async def migrate_tenants():
+    """One-time idempotent migration: assign existing data to 'SAUDALI ALIMENTOS' and
+    create a duplicate for 'FS SOLUÇÕES DEMO'. Promotes existing admin to Super-Admin."""
+    if await db.tenants.count_documents({}) > 0:
+        return
+    logger.info("Iniciando migração multi-tenant...")
+    saudali_id = str(uuid.uuid4())
+    demo_id = str(uuid.uuid4())
+    await db.tenants.insert_many([
+        {"id": saudali_id, "name": "SAUDALI ALIMENTOS", "created_at": now_iso()},
+        {"id": demo_id, "name": "FS SOLUÇÕES DEMO", "created_at": now_iso()},
+    ])
+
+    # 1) Assign all existing tenant-scoped data to SAUDALI
+    for col in ["machines", "measurements", "thermal", "diagnostics", "plant_nodes", "deletion_logs"]:
+        await db[col].update_many({"tenant_id": {"$exists": False}}, {"$set": {"tenant_id": saudali_id}})
+
+    # 2) Duplicate SAUDALI data for the DEMO tenant (remapping ids/references)
+    machine_map: Dict[str, str] = {}
+    async for m in db.machines.find({"tenant_id": saudali_id}):
+        new = {k: v for k, v in m.items() if k != "_id"}
+        new_id = str(uuid.uuid4())
+        machine_map[new["id"]] = new_id
+        new["id"] = new_id
+        new["tenant_id"] = demo_id
+        await db.machines.insert_one(new)
+
+    for col in ["measurements", "thermal", "diagnostics"]:
+        async for d in db[col].find({"tenant_id": saudali_id}):
+            new = {k: v for k, v in d.items() if k != "_id"}
+            new["id"] = str(uuid.uuid4())
+            new["tenant_id"] = demo_id
+            if new.get("machine_id") in machine_map:
+                new["machine_id"] = machine_map[new["machine_id"]]
+            await db[col].insert_one(new)
+
+    # plant_nodes: remap parent_id references
+    nodes = await db.plant_nodes.find({"tenant_id": saudali_id}).to_list(20000)
+    node_map = {n["id"]: str(uuid.uuid4()) for n in nodes}
+    for n in nodes:
+        new = {k: v for k, v in n.items() if k != "_id"}
+        new["id"] = node_map[n["id"]]
+        new["tenant_id"] = demo_id
+        if new.get("parent_id") in node_map:
+            new["parent_id"] = node_map[new["parent_id"]]
+        await db.plant_nodes.insert_one(new)
+
+    # 3) Promote existing admin to Super-Admin
+    admin_email = os.environ.get("ADMIN_EMAIL", "admin@fssolucoes.com")
+    await db.users.update_one({"email": admin_email}, {"$set": {"role": "superadmin", "tenant_id": None}})
+    # Any other legacy users default into SAUDALI
+    await db.users.update_many(
+        {"tenant_id": {"$exists": False}, "role": {"$ne": "superadmin"}},
+        {"$set": {"tenant_id": saudali_id}},
+    )
+
+    # 4) Create a tenant admin for each seeded tenant (for testing/login)
+    tenant_admins = [
+        {"tenant_id": saudali_id, "email": "admin@saudali.com", "name": "Admin Saudali"},
+        {"tenant_id": demo_id, "email": "admin@fsdemo.com", "name": "Admin FS Demo"},
+    ]
+    for ta in tenant_admins:
+        if not await db.users.find_one({"email": ta["email"]}):
+            await db.users.insert_one({
+                "id": str(uuid.uuid4()),
+                "email": ta["email"],
+                "password_hash": hash_password("demo123"),
+                "name": ta["name"],
+                "role": "admin",
+                "tenant_id": ta["tenant_id"],
+                "created_at": now_iso(),
+            })
+    logger.info("Migração multi-tenant concluída (SAUDALI + DEMO).")
 
 
 @app.on_event("startup")
 async def startup():
     await seed_data()
+    await migrate_tenants()
     logger.info("FS Soluções - Preditiva inicializado")
 
 # ============== Auth Routes ==============
 @api.post("/auth/register")
-async def register(payload: UserCreate, response: Response):
+async def register(payload: UserCreate, user=Depends(get_current_user)):
+    """Cria um usuário dentro do tenant em escopo. Somente admin/super-admin."""
+    if user.get("role") not in ("admin", "superadmin"):
+        raise HTTPException(status_code=403, detail="Permissão negada")
     email = payload.email.lower()
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="Email já cadastrado")
-    user = {
+    tid = write_tenant(user)
+    role = payload.role if payload.role != "superadmin" else "admin"
+    doc = {
         "id": str(uuid.uuid4()),
         "email": email,
         "password_hash": hash_password(payload.password),
         "name": payload.name,
-        "role": payload.role,
+        "role": role,
+        "tenant_id": tid,
         "created_at": now_iso(),
     }
-    await db.users.insert_one(user)
-    token = create_token(user["id"], email)
-    response.set_cookie("access_token", token, httponly=True, secure=False, samesite="lax", max_age=60 * 60 * 24 * 7, path="/")
-    return {"id": user["id"], "email": email, "name": user["name"], "role": user["role"], "token": token}
+    await db.users.insert_one(doc)
+    return {"id": doc["id"], "email": email, "name": doc["name"], "role": role}
 
 @api.post("/auth/login")
 async def login(payload: UserLogin, response: Response):
@@ -356,7 +462,7 @@ async def login(payload: UserLogin, response: Response):
         raise HTTPException(status_code=401, detail="Credenciais inválidas")
     token = create_token(user["id"], email)
     response.set_cookie("access_token", token, httponly=True, secure=False, samesite="lax", max_age=60 * 60 * 24 * 7, path="/")
-    return {"id": user["id"], "email": email, "name": user["name"], "role": user["role"], "token": token}
+    return {"id": user["id"], "email": email, "name": user["name"], "role": user["role"], "tenant_id": user.get("tenant_id"), "token": token}
 
 @api.post("/auth/logout")
 async def logout(response: Response):
@@ -368,20 +474,58 @@ async def me(user=Depends(get_current_user)):
     return user
 
 @api.get("/users")
-async def list_users(user=Depends(get_current_user)):
-    users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(500)
+async def list_users(user=Depends(require_admin)):
+    users = await db.users.find(TQ(user), {"_id": 0, "password_hash": 0}).to_list(500)
     return users
+
+# ============== Tenants (Super-Admin) ==============
+@api.get("/tenants")
+async def list_tenants(user=Depends(require_superadmin)):
+    tenants = await db.tenants.find({}, {"_id": 0}).sort("name", 1).to_list(1000)
+    for t in tenants:
+        t["machines_count"] = await db.machines.count_documents({"tenant_id": t["id"]})
+        t["users_count"] = await db.users.count_documents({"tenant_id": t["id"]})
+    return tenants
+
+@api.post("/tenants")
+async def create_tenant(payload: TenantCreate, user=Depends(require_superadmin)):
+    email = payload.admin_email.lower()
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(status_code=400, detail="Email do administrador já cadastrado")
+    tid = str(uuid.uuid4())
+    await db.tenants.insert_one({"id": tid, "name": payload.name, "created_at": now_iso()})
+    await db.users.insert_one({
+        "id": str(uuid.uuid4()),
+        "email": email,
+        "password_hash": hash_password(payload.admin_password),
+        "name": payload.admin_name,
+        "role": "admin",
+        "tenant_id": tid,
+        "created_at": now_iso(),
+    })
+    return {"id": tid, "name": payload.name, "admin_email": email}
+
+@api.delete("/tenants/{tid}")
+async def delete_tenant(tid: str, user=Depends(require_superadmin)):
+    tenant = await db.tenants.find_one({"id": tid}, {"_id": 0})
+    if not tenant:
+        raise HTTPException(404, "Cliente não encontrado")
+    for col in TENANT_COLLECTIONS:
+        await db[col].delete_many({"tenant_id": tid})
+    await db.tenants.delete_one({"id": tid})
+    return {"ok": True}
 
 # ============== Plant Hierarchy ==============
 @api.get("/plants")
 async def list_plants(user=Depends(get_current_user)):
-    nodes = await db.plant_nodes.find({}, {"_id": 0}).to_list(5000)
+    nodes = await db.plant_nodes.find(TQ(user), {"_id": 0}).to_list(5000)
     return nodes
 
 @api.post("/plants")
 async def create_plant(payload: PlantNode, user=Depends(require_editor)):
     doc = payload.model_dump()
     doc["id"] = str(uuid.uuid4())
+    doc["tenant_id"] = write_tenant(user)
     doc["created_at"] = now_iso()
     await db.plant_nodes.insert_one(doc)
     doc.pop("_id", None)
@@ -390,15 +534,15 @@ async def create_plant(payload: PlantNode, user=Depends(require_editor)):
 @api.put("/plants/{node_id}")
 async def update_plant(node_id: str, payload: PlantNode, user=Depends(require_editor)):
     update = {k: v for k, v in payload.model_dump().items() if v is not None and k != "id"}
-    res = await db.plant_nodes.update_one({"id": node_id}, {"$set": update})
+    res = await db.plant_nodes.update_one(TQ(user, {"id": node_id}), {"$set": update})
     if not res.matched_count:
         raise HTTPException(404, "Nó não encontrado")
     return {"ok": True}
 
 @api.delete("/plants/{node_id}")
 async def delete_plant(node_id: str, user=Depends(require_editor)):
-    node = await db.plant_nodes.find_one({"id": node_id}, {"_id": 0})
-    await db.plant_nodes.delete_one({"id": node_id})
+    node = await db.plant_nodes.find_one(TQ(user, {"id": node_id}), {"_id": 0})
+    await db.plant_nodes.delete_one(TQ(user, {"id": node_id}))
     if node:
         await log_deletion(user, "planta", f"{node.get('type','')}: {node.get('name','')}", {"id": node_id})
     return {"ok": True}
@@ -406,7 +550,7 @@ async def delete_plant(node_id: str, user=Depends(require_editor)):
 # ============== Machines ==============
 @api.get("/machines")
 async def list_machines(q: Optional[str] = None, tipo: Optional[str] = None, status: Optional[str] = None, user=Depends(get_current_user)):
-    qry: Dict[str, Any] = {}
+    qry: Dict[str, Any] = TQ(user)
     if q:
         qry["$or"] = [
             {"tag": {"$regex": q, "$options": "i"}},
@@ -425,8 +569,9 @@ async def list_machines(q: Optional[str] = None, tipo: Optional[str] = None, sta
 async def create_machine(payload: MachineModel, user=Depends(require_editor)):
     doc = payload.model_dump()
     doc["id"] = str(uuid.uuid4())
+    doc["tenant_id"] = write_tenant(user)
     doc["created_at"] = now_iso()
-    if await db.machines.find_one({"tag": doc["tag"]}):
+    if await db.machines.find_one({"tenant_id": doc["tenant_id"], "tag": doc["tag"]}):
         raise HTTPException(400, "TAG já cadastrada")
     await db.machines.insert_one(doc)
     doc.pop("_id", None)
@@ -435,23 +580,25 @@ async def create_machine(payload: MachineModel, user=Depends(require_editor)):
 @api.put("/machines/{machine_id}")
 async def update_machine(machine_id: str, payload: MachineModel, user=Depends(require_editor)):
     update = {k: v for k, v in payload.model_dump().items() if k != "id"}
-    res = await db.machines.update_one({"id": machine_id}, {"$set": update})
+    res = await db.machines.update_one(TQ(user, {"id": machine_id}), {"$set": update})
     if not res.matched_count:
         raise HTTPException(404, "Máquina não encontrada")
     return {"ok": True}
 
 @api.delete("/machines/{machine_id}")
 async def delete_machine(machine_id: str, user=Depends(require_editor)):
-    machine = await db.machines.find_one({"id": machine_id}, {"_id": 0})
-    n_meas = await db.measurements.count_documents({"machine_id": machine_id})
-    await db.machines.delete_one({"id": machine_id})
-    await db.measurements.delete_many({"machine_id": machine_id})
-    if machine:
-        await log_deletion(user, "máquina", f"TAG {machine.get('tag','')}", {"id": machine_id, "medicoes_removidas": n_meas})
+    machine = await db.machines.find_one(TQ(user, {"id": machine_id}), {"_id": 0})
+    if not machine:
+        raise HTTPException(404, "Máquina não encontrada")
+    n_meas = await db.measurements.count_documents({"tenant_id": machine.get("tenant_id"), "machine_id": machine_id})
+    await db.machines.delete_one(TQ(user, {"id": machine_id}))
+    await db.measurements.delete_many({"tenant_id": machine.get("tenant_id"), "machine_id": machine_id})
+    await log_deletion(user, "máquina", f"TAG {machine.get('tag','')}", {"id": machine_id, "medicoes_removidas": n_meas})
     return {"ok": True}
 
 @api.post("/machines/import")
 async def import_machines(file: UploadFile = File(...), user=Depends(require_editor)):
+    tid = write_tenant(user)
     content = await file.read()
     wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
     inserted = 0
@@ -524,6 +671,7 @@ async def import_machines(file: UploadFile = File(...), user=Depends(require_edi
             try:
                 doc = {
                     "id": str(uuid.uuid4()),
+                    "tenant_id": tid,
                     "tag": full_tag,
                     "parent_tag": cur_tag,
                     "subconjunto": sub,
@@ -541,7 +689,7 @@ async def import_machines(file: UploadFile = File(...), user=Depends(require_edi
                     "status": "Sem diag.",
                     "created_at": now_iso(),
                 }
-                exists = await db.machines.find_one({"tag": full_tag})
+                exists = await db.machines.find_one({"tenant_id": tid, "tag": full_tag})
                 if exists:
                     skipped += 1
                 else:
@@ -552,7 +700,7 @@ async def import_machines(file: UploadFile = File(...), user=Depends(require_edi
                 skipped += 1
     return {"inserted": inserted, "skipped": skipped}
 
-# ============== Defects ==============
+# ============== Defects (GLOBAL / shared) ==============
 @api.get("/defects")
 async def list_defects(user=Depends(get_current_user)):
     items = await db.defects.find({}, {"_id": 0}).to_list(2000)
@@ -586,7 +734,7 @@ async def delete_defect(defect_id: str, user=Depends(require_editor)):
 # ============== Diagnostics ==============
 @api.get("/diagnostics")
 async def list_diagnostics(q: Optional[str] = None, user=Depends(get_current_user)):
-    qry: Dict[str, Any] = {}
+    qry: Dict[str, Any] = TQ(user)
     if q:
         qry["$or"] = [
             {"machine_tag": {"$regex": q, "$options": "i"}},
@@ -598,29 +746,31 @@ async def list_diagnostics(q: Optional[str] = None, user=Depends(get_current_use
 
 @api.post("/diagnostics")
 async def create_diagnostic(payload: DiagnosticoModel, user=Depends(require_editor)):
+    tid = write_tenant(user)
     doc = payload.model_dump()
     doc["id"] = str(uuid.uuid4())
+    doc["tenant_id"] = tid
     doc["data"] = now_iso()
     doc["tecnico"] = doc.get("tecnico") or user.get("name", "")
     await db.diagnostics.insert_one(doc)
     # update machine status
-    await db.machines.update_one({"id": doc["machine_id"]}, {"$set": {"status": doc["status"]}})
+    await db.machines.update_one({"tenant_id": tid, "id": doc["machine_id"]}, {"$set": {"status": doc["status"]}})
     doc.pop("_id", None)
     return doc
 
 @api.put("/diagnostics/{diag_id}")
 async def update_diagnostic(diag_id: str, payload: DiagnosticoModel, user=Depends(require_editor)):
     update = {k: v for k, v in payload.model_dump().items() if k not in ("id",)}
-    res = await db.diagnostics.update_one({"id": diag_id}, {"$set": update})
+    res = await db.diagnostics.update_one(TQ(user, {"id": diag_id}), {"$set": update})
     if not res.matched_count:
         raise HTTPException(404, "Diagnóstico não encontrado")
-    await db.machines.update_one({"id": update.get("machine_id")}, {"$set": {"status": update.get("status")}})
+    await db.machines.update_one(TQ(user, {"id": update.get("machine_id")}), {"$set": {"status": update.get("status")}})
     return {"ok": True}
 
 @api.delete("/diagnostics/{diag_id}")
 async def delete_diagnostic(diag_id: str, user=Depends(require_editor)):
-    d = await db.diagnostics.find_one({"id": diag_id}, {"_id": 0})
-    await db.diagnostics.delete_one({"id": diag_id})
+    d = await db.diagnostics.find_one(TQ(user, {"id": diag_id}), {"_id": 0})
+    await db.diagnostics.delete_one(TQ(user, {"id": diag_id}))
     if d:
         await log_deletion(user, "diagnóstico", f"{d.get('machine_tag','')}: {(d.get('diagnostico','') or '')[:80]}", {"id": diag_id, "status": d.get("status")})
     return {"ok": True}
@@ -628,7 +778,7 @@ async def delete_diagnostic(diag_id: str, user=Depends(require_editor)):
 # ============== Measurements (Vibração) ==============
 @api.get("/measurements")
 async def list_measurements(machine_id: Optional[str] = None, user=Depends(get_current_user)):
-    qry: Dict[str, Any] = {}
+    qry: Dict[str, Any] = TQ(user)
     if machine_id:
         qry["machine_id"] = machine_id
     items = await db.measurements.find(qry, {"_id": 0}).sort([("ordem", 1), ("data", 1)]).to_list(20000)
@@ -639,7 +789,7 @@ async def list_measurements(machine_id: Optional[str] = None, user=Depends(get_c
 
 @api.get("/audit/deletions")
 async def list_deletions(user=Depends(require_admin)):
-    items = await db.deletion_logs.find({}, {"_id": 0}).sort("data", -1).to_list(3000)
+    items = await db.deletion_logs.find(TQ(user), {"_id": 0}).sort("data", -1).to_list(3000)
     return items
 
 # ============== Manual (admin) ==============
@@ -679,7 +829,7 @@ async def get_manual_pdf(user=Depends(require_admin)):
 async def measurements_template(user=Depends(get_current_user)):
     """Gera um .xlsx pré-preenchido com todas as máquinas de vibração."""
     machines = await db.machines.find(
-        {"tipo": {"$in": ["vibracao", "ambos"]}}, {"_id": 0}
+        TQ(user, {"tipo": {"$in": ["vibracao", "ambos"]}}), {"_id": 0}
     ).sort("tag", 1).to_list(10000)
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -709,6 +859,7 @@ async def measurements_template(user=Depends(get_current_user)):
 
 @api.post("/measurements/import")
 async def import_measurements(machine_id: Optional[str] = Query(None), file: UploadFile = File(...), user=Depends(require_editor)):
+    tid = write_tenant(user)
     content = await file.read()
     wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
     ws = wb[wb.sheetnames[0]]
@@ -748,32 +899,35 @@ async def import_measurements(machine_id: Optional[str] = Query(None), file: Upl
             unidade = str(col(row, "unidade", "") or "").strip()
             deteccao = str(col(row, "detecção", "") or col(row, "deteccao", "") or "").strip()
 
-            # Match machine: parent_tag + subconjunto (case-insensitive)
+            # Match machine: parent_tag + subconjunto (case-insensitive), tenant-scoped
             machine = None
             if sub:
                 machine = await db.machines.find_one({
+                    "tenant_id": tid,
                     "parent_tag": {"$regex": f"^{re.escape(equip)}$", "$options": "i"},
                     "subconjunto": {"$regex": f"^{re.escape(sub)}$", "$options": "i"},
                 })
             if not machine and sub:
                 # fuzzy: subconjunto "contém" (ex: "MOTOR" casa "Motor 01")
                 machine = await db.machines.find_one({
+                    "tenant_id": tid,
                     "parent_tag": {"$regex": f"^{re.escape(equip)}$", "$options": "i"},
                     "subconjunto": {"$regex": re.escape(sub), "$options": "i"},
                 })
             if not machine:
                 # try exact composite tag
-                machine = await db.machines.find_one({"tag": {"$regex": f"^{re.escape(equip)}$", "$options": "i"}})
+                machine = await db.machines.find_one({"tenant_id": tid, "tag": {"$regex": f"^{re.escape(equip)}$", "$options": "i"}})
             if not machine and sub:
-                machine = await db.machines.find_one({"tag": {"$regex": f"^{re.escape(equip)} / {re.escape(sub)}$", "$options": "i"}})
+                machine = await db.machines.find_one({"tenant_id": tid, "tag": {"$regex": f"^{re.escape(equip)} / {re.escape(sub)}$", "$options": "i"}})
             if not machine:
                 # try parent_tag only
-                machine = await db.machines.find_one({"parent_tag": {"$regex": f"^{re.escape(equip)}$", "$options": "i"}})
+                machine = await db.machines.find_one({"tenant_id": tid, "parent_tag": {"$regex": f"^{re.escape(equip)}$", "$options": "i"}})
             if not machine:
                 # create stub with composite tag
                 full_tag = f"{equip} / {sub}" if sub else equip
                 machine = {
                     "id": str(uuid.uuid4()),
+                    "tenant_id": tid,
                     "tag": full_tag,
                     "parent_tag": equip,
                     "subconjunto": sub,
@@ -789,6 +943,7 @@ async def import_measurements(machine_id: Optional[str] = Query(None), file: Upl
 
             doc = {
                 "id": str(uuid.uuid4()),
+                "tenant_id": tid,
                 "machine_id": machine["id"],
                 "machine_tag": machine.get("tag", equip),
                 "subconjunto": sub or machine.get("subconjunto", ""),
@@ -811,6 +966,7 @@ async def import_measurements(machine_id: Optional[str] = Query(None), file: Upl
 async def create_measurement(payload: MeasurementModel, user=Depends(require_editor)):
     doc = payload.model_dump()
     doc["id"] = str(uuid.uuid4())
+    doc["tenant_id"] = write_tenant(user)
     doc["data"] = now_iso()
     await db.measurements.insert_one(doc)
     doc.pop("_id", None)
@@ -818,8 +974,8 @@ async def create_measurement(payload: MeasurementModel, user=Depends(require_edi
 
 @api.delete("/measurements/{meas_id}")
 async def delete_measurement(meas_id: str, user=Depends(require_editor)):
-    m = await db.measurements.find_one({"id": meas_id}, {"_id": 0})
-    res = await db.measurements.delete_one({"id": meas_id})
+    m = await db.measurements.find_one(TQ(user, {"id": meas_id}), {"_id": 0})
+    res = await db.measurements.delete_one(TQ(user, {"id": meas_id}))
     if not res.deleted_count:
         raise HTTPException(404, "Medição não encontrada")
     if m:
@@ -829,8 +985,9 @@ async def delete_measurement(meas_id: str, user=Depends(require_editor)):
 @api.delete("/measurements/point/clear")
 async def delete_measurement_point(machine_id: str = Query(...), ponto: str = Query(""), deteccao: str = Query(""), user=Depends(require_editor)):
     """Remove todo o histórico de um ponto (máquina + ponto + detecção)."""
-    sample = await db.measurements.find_one({"machine_id": machine_id, "ponto": ponto, "deteccao": deteccao}, {"_id": 0})
-    res = await db.measurements.delete_many({"machine_id": machine_id, "ponto": ponto, "deteccao": deteccao})
+    base = TQ(user, {"machine_id": machine_id, "ponto": ponto, "deteccao": deteccao})
+    sample = await db.measurements.find_one(base, {"_id": 0})
+    res = await db.measurements.delete_many(base)
     if res.deleted_count and sample:
         await log_deletion(user, "medição (ponto)", f"{sample.get('machine_tag','')} • {ponto} ({deteccao}) — {res.deleted_count} registro(s)", {"machine_id": machine_id, "ponto": ponto, "deteccao": deteccao})
     return {"ok": True, "deleted": res.deleted_count}
@@ -838,7 +995,7 @@ async def delete_measurement_point(machine_id: str = Query(...), ponto: str = Qu
 @api.get("/measurements/export")
 async def export_measurements(machine_id: Optional[str] = Query(None), user=Depends(get_current_user)):
     from starlette.responses import StreamingResponse
-    qry: Dict[str, Any] = {}
+    qry: Dict[str, Any] = TQ(user)
     if machine_id:
         qry["machine_id"] = machine_id
     meas = await db.measurements.find(qry, {"_id": 0}).to_list(20000)
@@ -861,7 +1018,7 @@ async def export_measurements(machine_id: Optional[str] = Query(None), user=Depe
 # ============== Termografia (Temperatura) ==============
 @api.get("/thermal")
 async def list_thermal(machine_id: Optional[str] = None, user=Depends(get_current_user)):
-    qry: Dict[str, Any] = {}
+    qry: Dict[str, Any] = TQ(user)
     if machine_id:
         qry["machine_id"] = machine_id
     items = await db.thermal.find(qry, {"_id": 0}).sort([("ordem", 1), ("data", 1)]).to_list(20000)
@@ -877,7 +1034,7 @@ async def list_thermal(machine_id: Optional[str] = None, user=Depends(get_curren
 @api.get("/thermal/template")
 async def thermal_template(user=Depends(get_current_user)):
     from starlette.responses import StreamingResponse
-    machines = await db.machines.find({"tipo": {"$in": ["termografia", "ambos"]}}, {"_id": 0}).sort("tag", 1).to_list(10000)
+    machines = await db.machines.find(TQ(user, {"tipo": {"$in": ["termografia", "ambos"]}}), {"_id": 0}).sort("tag", 1).to_list(10000)
     wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Termografia"
     headers = ["Equipamento", "Ponto", "Temperatura", "Temp_Ambiente"]
     ws.append(headers)
@@ -893,6 +1050,7 @@ async def thermal_template(user=Depends(get_current_user)):
 
 @api.post("/thermal/import")
 async def import_thermal(file: UploadFile = File(...), user=Depends(require_editor)):
+    tid = write_tenant(user)
     content = await file.read()
     wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
     ws = wb[wb.sheetnames[0]]
@@ -926,14 +1084,14 @@ async def import_thermal(file: UploadFile = File(...), user=Depends(require_edit
             amb_raw = col(row, "temp_ambiente")
             temp_ambiente = float(amb_raw) if amb_raw not in (None, "") else None
 
-            machine = await db.machines.find_one({"tag": {"$regex": f"^{re.escape(equip)}$", "$options": "i"}})
+            machine = await db.machines.find_one({"tenant_id": tid, "tag": {"$regex": f"^{re.escape(equip)}$", "$options": "i"}})
             if not machine:
-                machine = await db.machines.find_one({"parent_tag": {"$regex": f"^{re.escape(equip)}$", "$options": "i"}})
+                machine = await db.machines.find_one({"tenant_id": tid, "parent_tag": {"$regex": f"^{re.escape(equip)}$", "$options": "i"}})
             if not machine:
-                machine = {"id": str(uuid.uuid4()), "tag": equip, "parent_tag": equip, "subconjunto": "", "local": "", "equipamento": equip, "descricao": "", "componente": ponto, "tipo": "termografia", "criticidade": "Média", "status": "Sem diag.", "created_at": now_iso()}
+                machine = {"id": str(uuid.uuid4()), "tenant_id": tid, "tag": equip, "parent_tag": equip, "subconjunto": "", "local": "", "equipamento": equip, "descricao": "", "componente": ponto, "tipo": "termografia", "criticidade": "Média", "status": "Sem diag.", "created_at": now_iso()}
                 await db.machines.insert_one(machine)
 
-            doc = {"id": str(uuid.uuid4()), "machine_id": machine["id"], "machine_tag": machine.get("tag", equip),
+            doc = {"id": str(uuid.uuid4()), "tenant_id": tid, "machine_id": machine["id"], "machine_tag": machine.get("tag", equip),
                    "ponto": ponto, "temperatura": temperatura, "temp_ambiente": temp_ambiente, "ordem": seq, "data": batch_ts}
             await db.thermal.insert_one(doc)
             inserted += 1; seq += 1
@@ -944,16 +1102,17 @@ async def import_thermal(file: UploadFile = File(...), user=Depends(require_edit
 
 @api.delete("/thermal/point/clear")
 async def delete_thermal_point(machine_id: str = Query(...), ponto: str = Query(""), user=Depends(require_editor)):
-    sample = await db.thermal.find_one({"machine_id": machine_id, "ponto": ponto}, {"_id": 0})
-    res = await db.thermal.delete_many({"machine_id": machine_id, "ponto": ponto})
+    base = TQ(user, {"machine_id": machine_id, "ponto": ponto})
+    sample = await db.thermal.find_one(base, {"_id": 0})
+    res = await db.thermal.delete_many(base)
     if res.deleted_count and sample:
         await log_deletion(user, "temperatura (ponto)", f"{sample.get('machine_tag','')} • {ponto} — {res.deleted_count} registro(s)", {"machine_id": machine_id, "ponto": ponto})
     return {"ok": True, "deleted": res.deleted_count}
 
 @api.delete("/thermal/{tid}")
 async def delete_thermal(tid: str, user=Depends(require_editor)):
-    t = await db.thermal.find_one({"id": tid}, {"_id": 0})
-    res = await db.thermal.delete_one({"id": tid})
+    t = await db.thermal.find_one(TQ(user, {"id": tid}), {"_id": 0})
+    res = await db.thermal.delete_one(TQ(user, {"id": tid}))
     if not res.deleted_count:
         raise HTTPException(404, "Registro não encontrado")
     if t:
@@ -963,7 +1122,7 @@ async def delete_thermal(tid: str, user=Depends(require_editor)):
 @api.get("/thermal/export")
 async def export_thermal(machine_id: Optional[str] = Query(None), user=Depends(get_current_user)):
     from starlette.responses import StreamingResponse
-    qry: Dict[str, Any] = {}
+    qry: Dict[str, Any] = TQ(user)
     if machine_id:
         qry["machine_id"] = machine_id
     items = await db.thermal.find(qry, {"_id": 0}).to_list(20000)
@@ -986,8 +1145,8 @@ async def export_thermal(machine_id: Optional[str] = Query(None), user=Depends(g
 # ============== Dashboard ==============
 @api.get("/dashboard")
 async def dashboard(user=Depends(get_current_user)):
-    machines = await db.machines.find({}, {"_id": 0}).to_list(10000)
-    diagnostics = await db.diagnostics.find({}, {"_id": 0}).to_list(5000)
+    machines = await db.machines.find(TQ(user), {"_id": 0}).to_list(10000)
+    diagnostics = await db.diagnostics.find(TQ(user), {"_id": 0}).to_list(5000)
     total = len(machines)
     machines_with_diag = {d["machine_id"] for d in diagnostics}
     status_dist = {"OK": 0, "A1": 0, "A2": 0, "Parado": 0, "Sem diag.": 0}
@@ -1044,7 +1203,7 @@ async def dashboard(user=Depends(get_current_user)):
 
     # Alertas do último upload (medições/temperaturas em A2 ou Parado — último valor por ponto)
     alerts = []
-    meas = await db.measurements.find({}, {"_id": 0}).to_list(20000)
+    meas = await db.measurements.find(TQ(user), {"_id": 0}).to_list(20000)
     latest_m: Dict[str, Any] = {}
     for m in meas:
         key = f"{m['machine_id']}||{m.get('ponto','')}||{m.get('deteccao','')}"
@@ -1056,7 +1215,7 @@ async def dashboard(user=Depends(get_current_user)):
         if al in ("A2", "Parado"):
             alerts.append({"tipo": "Vibração", "machine_tag": m.get("machine_tag", ""), "ponto": m.get("ponto", ""),
                            "valor": m.get("valor"), "unidade": m.get("unidade", ""), "alarme": al, "data": m.get("data")})
-    thermal = await db.thermal.find({}, {"_id": 0}).to_list(20000)
+    thermal = await db.thermal.find(TQ(user), {"_id": 0}).to_list(20000)
     latest_t: Dict[str, Any] = {}
     for t in thermal:
         key = f"{t['machine_id']}||{t.get('ponto','')}"
@@ -1085,8 +1244,8 @@ async def dashboard(user=Depends(get_current_user)):
 @api.get("/reports/summary")
 async def report_summary(user=Depends(get_current_user)):
     """Resumo executivo: KPIs + status + top defeitos."""
-    machines = await db.machines.find({}, {"_id": 0}).to_list(10000)
-    diagnostics = await db.diagnostics.find({}, {"_id": 0}).sort("data", -1).to_list(5000)
+    machines = await db.machines.find(TQ(user), {"_id": 0}).to_list(10000)
+    diagnostics = await db.diagnostics.find(TQ(user), {"_id": 0}).sort("data", -1).to_list(5000)
     defects = await db.defects.find({}, {"_id": 0}).to_list(2000)
     id_to_name = {d["id"]: d["nome"] for d in defects}
     status_dist = {"OK": 0, "A1": 0, "A2": 0, "Parado": 0}
@@ -1120,8 +1279,8 @@ async def report_summary(user=Depends(get_current_user)):
 async def report_complete(user=Depends(get_current_user)):
     """Relatório completo: tudo do resumo + lista de todos os diagnósticos com detalhes."""
     summary = await report_summary(user)
-    diagnostics = await db.diagnostics.find({}, {"_id": 0}).sort("data", -1).to_list(5000)
-    machines = await db.machines.find({}, {"_id": 0}).to_list(10000)
+    diagnostics = await db.diagnostics.find(TQ(user), {"_id": 0}).sort("data", -1).to_list(5000)
+    machines = await db.machines.find(TQ(user), {"_id": 0}).to_list(10000)
     machine_map = {m["id"]: m for m in machines}
     enriched = []
     for d in diagnostics:
@@ -1131,7 +1290,7 @@ async def report_complete(user=Depends(get_current_user)):
 
 @api.get("/machines/{machine_id}/history")
 async def machine_history(machine_id: str, user=Depends(get_current_user)):
-    diags = await db.diagnostics.find({"machine_id": machine_id}, {"_id": 0}).sort("data", 1).to_list(1000)
+    diags = await db.diagnostics.find(TQ(user, {"machine_id": machine_id}), {"_id": 0}).sort("data", 1).to_list(1000)
     return diags
 
 

@@ -8,10 +8,12 @@ const api = axios.create({
   withCredentials: true,
 });
 
-// Attach token from localStorage as well (fallback)
+// Attach token from localStorage as well (fallback) + tenant scope for Super-Admin
 api.interceptors.request.use((cfg) => {
   const t = localStorage.getItem("fs_token");
   if (t) cfg.headers.Authorization = `Bearer ${t}`;
+  const tid = localStorage.getItem("fs_tenant");
+  if (tid) cfg.headers["X-Tenant-Id"] = tid;
   return cfg;
 });
 

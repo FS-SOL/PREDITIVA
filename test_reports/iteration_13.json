@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 13 — Multi-tenant architecture E2E validated. All 22 backend pytest cases PASS (super-admin login/me, /api/tenants RBAC, cross-tenant isolation for machines/dashboard/diagnostics/measurements/thermal, spoofed X-Tenant-Id ignored for tenant-admins, POST/DELETE /api/tenants, new tenant empty state, global defects shared, write requires tenant scope, /auth/register scoped). Frontend flows verified via Playwright for both super-admin and tenant-admin.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter13_multitenant.py",
+    "/app/test_reports/pytest/iter13_multitenant.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py has grown to ~1310 lines — consider splitting into routers (auth, tenants, machines, measurements, thermal, defects, diagnostics, reports, manual) for maintainability.",
+    "DELETE /api/tenants/{tid} deletes tenant + all tenant-scoped collections, but does NOT block deletion of the currently-scoped tenant of a super-admin session; harmless (super-admin can just re-select), but consider audit-logging the tenant deletion (currently no /deletion_logs entry is written for the tenant itself).",
+    "get_current_user() re-queries Mongo on every request. Fine for now, but if traffic grows, consider a short-lived in-memory cache keyed on JWT jti to reduce DB roundtrips.",
+    "Frontend Layout.js reads localStorage 'fs_tenant' directly for the no-tenant-banner condition rather than using the AuthContext tenantId state — works but could cause a stale render on very fast tenant switches. Minor."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter13_multitenant.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (22/22 pytest)",
+    "frontend": "100% — super-admin sees tenant-switcher + nav-clientes + no-tenant-banner + 2 tenant cards (SAUDALI ALIMENTOS, FS SOLUÇÕES DEMO); Acessar sets fs_tenant and shows 413 machines & dashboard KPIs; tenant-select switch works; new-tenant modal + save-tenant-btn present. Tenant-admin (admin@saudali.com) sees NO tenant-switcher, NO nav-clientes, NO no-tenant-banner and gets 413 machines directly."
+  },
+  "test_credentials": "Super-Admin: admin@fssolucoes.com/admin123 (superadmin, tenant_id null). Tenant Admins: admin@saudali.com/demo123 (SAUDALI ALIMENTOS, ~413 machines), admin@fsdemo.com/demo123 (FS SOLUÇÕES DEMO, ~413 machines migrated).",
+  "seed_data_creation": "No persistent seed changes. Test lifecycle: create+delete of TEST_TenantCo_* tenant, TEST_M_* machines (deleted at end), TEST_user_*@saudali.com scoped to SAUDALI (attempted cleanup). No pollution left.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Multi-tenant is fully functional. Tenants in DB: SAUDALI ALIMENTOS (id lookup via GET /api/tenants) with 413 machines & FS SOLUÇÕES DEMO with duplicate 413 machines. Isolation rules: Super-admin MUST send X-Tenant-Id header for scoped reads (empty otherwise) and for writes (400 otherwise). Tenant-admins are auto-scoped; any X-Tenant-Id header they send is IGNORED (verified). /api/defects is intentionally GLOBAL — same list across tenants. Frontend axios interceptor (src/lib/api.js) sends X-Tenant-Id from localStorage 'fs_tenant'; AuthContext clears fs_tenant on non-superadmin login and on logout. Backend defects insert has unique index on 'nome'.",
+  "rca of the issue": "N/A — no bugs found in this iteration."
+}
