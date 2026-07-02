@@ -66,6 +66,9 @@ Criar software de manutenção preditiva. Login (e-mail/senha + Google) com side
 ## Fix (Jul 2026)
 - Corrigido efeito "escada" na Tabela de Dados: importação agora usa UM timestamp por lote (batch_ts) e a matriz (Vibração e Termografia) agrupa colunas por MINUTO — medições da mesma coleta ficam na mesma coluna, independente do ponto. Coletas de horários diferentes permanecem separadas. Exports Excel também agrupados por minuto. Validado iteration_11: backend 8/8, frontend 100%.
 
+## Manual (Jul 2026)
+- Página "Manual" (somente admin) com o manual renderizado (react-markdown) + botão "Baixar PDF" (backend gera via markdown+xhtml2pdf a partir de /app/MANUAL.md). Endpoints GET /api/manual e /api/manual/pdf (require_admin). Guarda de perfil no frontend. Manual completo em /app/MANUAL.md. Validado iteration_12: backend 6/6, frontend 100%.
+
 ## Backlog (P1/P2)
 - P1: Login com Google (Emergent Auth)
 - P1: Exportar diagnósticos em PDF/Excel
