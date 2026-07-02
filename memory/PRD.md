@@ -1,78 +1,33 @@
-# FS Soluções — Preditiva
+# PRD — FS Soluções · Manutenção Preditiva (SaaS Multi-Tenant)
 
-## Problem Statement (original)
-Criar software de manutenção preditiva. Login (e-mail/senha + Google) com sidebar colapsável e cadastro de usuários. Dashboard executivo com KPIs, distribuição de status (OK/A1/A2/Parado), evolução mensal, principais defeitos e índice de saúde. Gráfico com probabilidade de falha. Hierarquia Empresa → Unidade → Área → Equipamento → Subconjunto → Pontos com importação Excel. Cadastro completo de máquinas com busca e importação. Listas de Análise de Vibração e Termografia em cards. Biblioteca de Defeitos catalogada (desbalanceamento, desalinhamento, BPFO/BPFI/BSF, cavitação, folga, barra quebrada) editável. Tela de diagnóstico em 3 colunas com auto-preenchimento. Banco de diagnósticos pesquisável. Template Excel para importação com linha de tendência por ponto. Nome: FS SOLUÇÕES - PREDITIVA.
+## Problema Original
+Software de manutenção preditiva (pt-BR) com: Login, Dashboard (KPIs + Índice de Saúde), Plantas (hierarquia), Máquinas com importação Excel (desdobrando subconjuntos), Análise de Vibração e Termografia, Biblioteca de Defeitos pesquisável e Diagnósticos (cards, histórico, banco). Evoluído para **arquitetura multi-tenant** (SaaS) com isolamento estrito de dados por cliente e papel Super-Admin.
 
-## Architecture
-- Backend: FastAPI + Motor (MongoDB) + JWT (HttpOnly cookie + Bearer fallback) + bcrypt
-- Frontend: React 19 + React Router 7 + Tailwind + shadcn/ui + Recharts + lucide-react
-- Auth: email/senha JWT, admin seedado automaticamente
+## Arquitetura
+- Backend: FastAPI monolítico (`/app/backend/server.py`), Motor/MongoDB, PyJWT + bcrypt, openpyxl, xhtml2pdf.
+- Frontend: React SPA, Tailwind + Shadcn, Recharts, ReactMarkdown. Auth via cookie HttpOnly + Bearer (localStorage `fs_token`).
+- Multi-tenant: `tenant_id` em machines, measurements, thermal, diagnostics, plant_nodes, deletion_logs, users. `defects` é GLOBAL/compartilhado.
+- Escopo de tenant: super-admin envia header `X-Tenant-Id` (localStorage `fs_tenant`); usuários comuns são presos ao próprio `tenant_id`.
 
-## User Personas
-- Administrador: gerencia usuários, plantas e biblioteca
-- Gestor: visualiza dashboards e ranking de falhas
-- Técnico: executa diagnósticos e edita recomendações
+## Papéis
+- superadmin (FS Soluções): cria/gerencia clientes e admins; opera dados de um cliente selecionado.
+- admin (tenant): CRUD completo + gerencia usuários do próprio tenant.
+- gestor / tecnico: edição. visualizador: somente leitura.
 
-## Implemented (Feb 2026)
-- Login + cadastro de usuários (JWT)
-- Sidebar colapsável (8 seções)
-- Dashboard executivo (KPIs, pizza status, evolução mensal, top defeitos, probabilidade de falha)
-- Hierarquia de Plantas com árvore expansível
-- CRUD de Máquinas com busca, filtro por tipo, importação Excel
-- Biblioteca de Defeitos (11 defeitos seedados: desbalanceamento, desalinhamento, BPFO, BPFI, BSF, folga, cavitação, barra quebrada, GMF, lubrificação, termografia)
-- Diagnóstico em 3 colunas com auto-preenchimento e atualização de status
-- Banco de diagnósticos pesquisável
-- Lista de Análise de Vibração com cards e linha de tendência por ponto
-- Lista de Termografia com cards
-- Importação Excel de medidas (template_overall_vibracao)
+## Implementado (data: 02/07/2026)
+- ✅ Multi-Tenant (P0): coleção `tenants`, papel superadmin, `tenant_id` em todas coleções escopadas, todas as queries filtradas por tenant, defects globais.
+- ✅ Migração idempotente: dados existentes → tenant "SAUDALI ALIMENTOS" + cópia "FS SOLUÇÕES DEMO" (413 máquinas cada). Admin promovido a superadmin. Tenant-admins criados (admin@saudali.com, admin@fsdemo.com / demo123).
+- ✅ Endpoints /api/tenants (GET/POST/DELETE, superadmin). POST /api/auth/register agora cria usuário escopado ao tenant (admin/superadmin, sem trocar sessão).
+- ✅ Frontend: página Clientes (CRUD + Acessar), seletor de tenant no header (super-admin), banner de "selecione um cliente", nav condicional por papel. Login simplificado (sem cadastro público).
+- ✅ Testado: iteration_13.json — 22/22 backend pytest, frontend E2E OK, isolamento e spoof-header validados.
+- (Sessões anteriores) Dashboard, Plantas, Máquinas+import Excel, Vibração/Termografia (Tabela de Dados, tendência, templates), Biblioteca de Defeitos, Diagnósticos, Auditoria, Manual PDF (admin).
 
-## Updated (Jun 2026)
-- Corrigida importação de Medições Overall: casa máquina por parent_tag + subconjunto (case-insensitive), com fallback para tag composta; cria stub se não achar. Verificado via curl.
-- `GET /api/measurements/template`: gera .xlsx pré-preenchido com todas as máquinas de vibração (Equipamento=parent_tag, Subconjunto). Botão "Baixar Template" na tela de Vibração.
-- Aba "Medições" em Análise de Vibração: tabela global (Data, Equip., Subconjunto, Ponto, Valor, Unidade, Detecção, Alarme ISO 10816-3).
-- Helper `iso_alarm` (ISO 10816-3 velocidade RMS mm/s: OK≤2.8, A1≤7.1, A2≤11, Parado>11; escala separada para aceleração g).
-- Cards de vibração mostram "Pico: <valor> <unidade> @ <ponto>".
-- Dashboard já conta subconjuntos (registros individuais) — confirmado, sem alteração necessária.
+## Backlog / Roadmap
+- [P1] Relatório Executivo e Completo em PDF (com logo da empresa no cabeçalho).
+- [P1] Refatorar `server.py` (~1310 linhas) em routers modulares (auth, tenants, machines, measurements, thermal, defects, diagnostics, reports).
+- [P2] Sugestão de defeitos por IA a partir de sintomas.
+- [P2] Envio automático de relatórios completos por e-mail (agendado).
+- [P2] Audit-log da exclusão de tenant; logo/branding por tenant.
 
-## Updated (Jun 2026 - parte 2)
-- Aba Medições reformulada: filtro por máquina (dropdown), mostra apenas o VALOR ATUAL por ponto (último por data), preservando o histórico no banco.
-- Tendência por ponto: botão "Ver" abre modal com gráfico da evolução mensal daquele ponto.
-- Excluir medição: botão por linha (DELETE /api/measurements/point/clear) + endpoint DELETE /api/measurements/{id}. Ambos bloqueiam visualizador (403).
-- Pico no card agora usa o valor atual por ponto: "Pico: <valor> <unidade> @ <ponto>".
-- Importação de Termografia: botão "Importar Lista" na tela Termografia (POST /api/machines/import detecta aba com TERMO), oculto para visualizador.
-- Testado: backend 8/8 (iteration_5), frontend validado (admin + viewer RBAC).
-
-## Updated (Jun 2026 - parte 3)
-- CORRIGIDO import de Termografia: na planilha real cada linha da aba TERMOGRAFIA é um equipamento próprio (TAG+LOCAL) sem subconjunto. O parser agora ramifica por tipo: termografia trata subconjunto como opcional (tag = TAG crua); vibração mantém tag composta via Descrição. Importou 200 registros de termografia. Validado iteration_6 (backend 13/13, frontend 5/5).
-
-## Updated (Jul 2026 - parte 4)
-- CORRIGIDO pico no card de vibração (maior valor entre pontos) + matching de subconjunto por "contém" (ex: MOTOR→Motor 01). Limpeza de stubs de tag crua. Validado iteration_7.
-- Ordem da importação preservada: campo `ordem` nas medições; listagem ordenada por ordem (com backfill p/ legados).
-- Tendência corrigida: por ponto (máquina+ponto+detecção); modal da máquina lista pontos com valor atual e botão de tendência.
-- Nova aba "Tabela de Dados" na Vibração: matriz equipamento/ponto × colunas de datas, células coloridas por alarme ISO.
-- Timeline de status de diagnóstico no card de vibração (bolinhas coloridas).
-- Excluir diagnóstico também dentro do modal de histórico da máquina.
-- Defeitos com campo `tipo` (vibracao/termografia/ambos); tela Diagnóstico filtra defeitos pelo tipo da máquina; adicionados defeitos padrão de termografia + defeito "Equipamento em Bom Estado" (Status OK).
-- Auditoria: tela "Histórico de Exclusões" (somente admin) + log de toda exclusão (diagnóstico, medição, máquina, defeito, planta) com usuário/quando. Endpoint GET /api/audit/deletions.
-- Validado iteration_8: frontend 11/11, backend 10/11 (item de backfill de `ordem` corrigido depois).
-
-## Updated (Jul 2026 - parte 5)
-- Correção: Tabela de Dados e Tendência agrupam por data+hora (mesmo dia não colapsa). Visão Cards/Lista com busca em Vibração e Termografia. Validado iteration_9.
-- **Temperatura na Termografia**: template + importação; aba "Temperaturas" (valor atual, ambiente, ΔT, alarme OK≤60/A1≤90/A2≤120/Parado>120 °C), tendência por ponto, exclusão; "Máx °C" nos cards/lista; aba "Tabela de Dados". Collection `thermal`, endpoints /api/thermal/*.
-- **Exportar Tabela de Dados (Excel)**: /api/measurements/export e /api/thermal/export (pivot ponto×datas) + botões "Exportar Excel".
-- **Dashboard — Alertas do Último Upload**: bloco com pontos em A2/Parado no valor mais recente (`latest_alerts`).
-- Descritivo completo em /app/FUNCIONALIDADES.md. Validado iteration_10: backend 7/7, frontend 100%.
-
-## Fix (Jul 2026)
-- Corrigido efeito "escada" na Tabela de Dados: importação agora usa UM timestamp por lote (batch_ts) e a matriz (Vibração e Termografia) agrupa colunas por MINUTO — medições da mesma coleta ficam na mesma coluna, independente do ponto. Coletas de horários diferentes permanecem separadas. Exports Excel também agrupados por minuto. Validado iteration_11: backend 8/8, frontend 100%.
-
-## Manual (Jul 2026)
-- Página "Manual" (somente admin) com o manual renderizado (react-markdown) + botão "Baixar PDF" (backend gera via markdown+xhtml2pdf a partir de /app/MANUAL.md). Endpoints GET /api/manual e /api/manual/pdf (require_admin). Guarda de perfil no frontend. Manual completo em /app/MANUAL.md. Validado iteration_12: backend 6/6, frontend 100%.
-
-## Backlog (P1/P2)
-- P1: Login com Google (Emergent Auth)
-- P1: Exportar diagnósticos em PDF/Excel
-- P1: Anexar fotos/relatórios nos diagnósticos
-- P2: Notificações por e-mail quando status escalar
-- P2: Histórico de manutenção e custos
-- P2: IA para sugerir defeitos a partir dos sintomas
+## Credenciais
+Ver `/app/memory/test_credentials.md`.
