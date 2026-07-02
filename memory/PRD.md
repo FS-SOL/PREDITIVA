@@ -56,6 +56,13 @@ Criar software de manutenção preditiva. Login (e-mail/senha + Google) com side
 - Auditoria: tela "Histórico de Exclusões" (somente admin) + log de toda exclusão (diagnóstico, medição, máquina, defeito, planta) com usuário/quando. Endpoint GET /api/audit/deletions.
 - Validado iteration_8: frontend 11/11, backend 10/11 (item de backfill de `ordem` corrigido depois).
 
+## Updated (Jul 2026 - parte 5)
+- Correção: Tabela de Dados e Tendência agrupam por data+hora (mesmo dia não colapsa). Visão Cards/Lista com busca em Vibração e Termografia. Validado iteration_9.
+- **Temperatura na Termografia**: template + importação; aba "Temperaturas" (valor atual, ambiente, ΔT, alarme OK≤60/A1≤90/A2≤120/Parado>120 °C), tendência por ponto, exclusão; "Máx °C" nos cards/lista; aba "Tabela de Dados". Collection `thermal`, endpoints /api/thermal/*.
+- **Exportar Tabela de Dados (Excel)**: /api/measurements/export e /api/thermal/export (pivot ponto×datas) + botões "Exportar Excel".
+- **Dashboard — Alertas do Último Upload**: bloco com pontos em A2/Parado no valor mais recente (`latest_alerts`).
+- Descritivo completo em /app/FUNCIONALIDADES.md. Validado iteration_10: backend 7/7, frontend 100%.
+
 ## Backlog (P1/P2)
 - P1: Login com Google (Emergent Auth)
 - P1: Exportar diagnósticos em PDF/Excel
