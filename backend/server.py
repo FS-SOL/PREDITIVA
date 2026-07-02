@@ -274,6 +274,8 @@ async def seed_data():
         )
     # backfill tipo for any legacy defect missing it
     await db.defects.update_many({"tipo": {"$exists": False}}, {"$set": {"tipo": "vibracao"}})
+    # backfill ordem for any legacy measurement missing it
+    await db.measurements.update_many({"ordem": {"$exists": False}}, {"$set": {"ordem": 0}})
 
     # Empresa
     empresa = await db.plant_nodes.find_one({"type": "empresa"})
@@ -596,6 +598,7 @@ async def list_measurements(machine_id: Optional[str] = None, user=Depends(get_c
         qry["machine_id"] = machine_id
     items = await db.measurements.find(qry, {"_id": 0}).sort([("ordem", 1), ("data", 1)]).to_list(20000)
     for it in items:
+        it.setdefault("ordem", 0)
         it["alarme"] = iso_alarm(it.get("valor"), it.get("unidade", ""), it.get("deteccao", ""))
     return items
 

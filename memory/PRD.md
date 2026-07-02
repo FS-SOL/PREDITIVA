@@ -45,6 +45,17 @@ Criar software de manutenção preditiva. Login (e-mail/senha + Google) com side
 ## Updated (Jun 2026 - parte 3)
 - CORRIGIDO import de Termografia: na planilha real cada linha da aba TERMOGRAFIA é um equipamento próprio (TAG+LOCAL) sem subconjunto. O parser agora ramifica por tipo: termografia trata subconjunto como opcional (tag = TAG crua); vibração mantém tag composta via Descrição. Importou 200 registros de termografia. Validado iteration_6 (backend 13/13, frontend 5/5).
 
+## Updated (Jul 2026 - parte 4)
+- CORRIGIDO pico no card de vibração (maior valor entre pontos) + matching de subconjunto por "contém" (ex: MOTOR→Motor 01). Limpeza de stubs de tag crua. Validado iteration_7.
+- Ordem da importação preservada: campo `ordem` nas medições; listagem ordenada por ordem (com backfill p/ legados).
+- Tendência corrigida: por ponto (máquina+ponto+detecção); modal da máquina lista pontos com valor atual e botão de tendência.
+- Nova aba "Tabela de Dados" na Vibração: matriz equipamento/ponto × colunas de datas, células coloridas por alarme ISO.
+- Timeline de status de diagnóstico no card de vibração (bolinhas coloridas).
+- Excluir diagnóstico também dentro do modal de histórico da máquina.
+- Defeitos com campo `tipo` (vibracao/termografia/ambos); tela Diagnóstico filtra defeitos pelo tipo da máquina; adicionados defeitos padrão de termografia + defeito "Equipamento em Bom Estado" (Status OK).
+- Auditoria: tela "Histórico de Exclusões" (somente admin) + log de toda exclusão (diagnóstico, medição, máquina, defeito, planta) com usuário/quando. Endpoint GET /api/audit/deletions.
+- Validado iteration_8: frontend 11/11, backend 10/11 (item de backfill de `ordem` corrigido depois).
+
 ## Backlog (P1/P2)
 - P1: Login com Google (Emergent Auth)
 - P1: Exportar diagnósticos em PDF/Excel
