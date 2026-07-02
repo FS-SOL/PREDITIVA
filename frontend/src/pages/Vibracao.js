@@ -310,7 +310,7 @@ export default function Vibracao() {
                   <td>{m.unidade || "—"}</td>
                   <td>{m.deteccao || "—"}</td>
                   <td><StatusBadge status={m.alarme} /></td>
-                  <td className="whitespace-nowrap text-xs">{formatDate(m.data)}</td>
+                  <td className="whitespace-nowrap text-xs">{formatDateTime(m.data)}</td>
                   <td>
                     <button data-testid={`trend-btn-${m.id}`} onClick={() => setTrendPoint(m)} className="p-1 hover:bg-slate-100 rounded text-slate-700 inline-flex items-center gap-1 text-xs">
                       <TrendingUp size={14} /> Ver
